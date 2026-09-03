@@ -364,7 +364,7 @@
       <div class="panel-body">
         <div class="grid" style="grid-template-columns:1fr 1.4fr; gap:20px;">
           <div>
-            <div class="type-desc" style="margin-bottom:12px;">Player stock is a cash equity position. Trades use the admin-published Firestore market price, so the browser cannot change the price used for a buy or sell.</div>
+            <div class="type-desc" style="margin-bottom:12px;">Player stock is a cash equity position. Buy at the current market price, hold it through future reports, and sell whenever you choose. Your unrealized value uses the latest player price.</div>
             <div class="field"><label>Player stock</label><select id="assetSymbol"><option value="">— select a stock —</option></select></div>
             <div class="field"><label>Shares</label><input type="number" id="assetQty" min="1" step="1" value="1"></div>
             <div class="premium-box" id="assetPreview">
@@ -374,13 +374,6 @@
             </div>
             <button class="primary-btn" id="assetBuyBtn" disabled>Select a stock first</button>
             <div class="msg" id="assetMsg"></div>
-            <div class="premium-box" style="margin-top:18px;">
-              <div style="font-family:var(--sans);font-size:17px;font-weight:600;margin-bottom:10px;color:var(--text);">Send Cash</div>
-              <div class="field"><label>Recipient username</label><input type="text" id="transferUsername" maxlength="20" placeholder="player username"></div>
-              <div class="field"><label>Amount ($)</label><input type="number" id="transferAmount" min="0.01" step="0.01" value="100"></div>
-              <button class="primary-btn" id="sendCashBtn">Send Cash</button>
-              <div class="msg" id="transferMsg"></div>
-            </div>
           </div>
           <div>
             <div class="panel-head" style="margin:-14px -16px 14px;"><h2>Your Holdings</h2><span class="sub" id="assetSub">0 shares</span></div>
@@ -439,8 +432,8 @@ import {
   signInWithEmailAndPassword, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  collection, addDoc, onSnapshot, query, orderBy, where, writeBatch,
+  getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
+  collection, addDoc, onSnapshot, query, orderBy,
   runTransaction, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
@@ -552,26 +545,10 @@ onAuthStateChanged(auth, async (user) => {
   const snap = await getDoc(userRef);
   if(!snap.exists()){
     const username = pendingUsername || user.email.split('@')[0];
-    const usernameKey = username.trim().toLowerCase();
-    await runTransaction(db, async tx => {
-      const dirRef = doc(db,'userDirectory',user.uid);
-      const dirSnap = await tx.get(dirRef);
-      if(dirSnap.exists() && dirSnap.data().uid !== user.uid) throw new Error('That username is already registered.');
-      tx.set(userRef, { username, cash: 10000, realized: 0, lastOpId: '', createdAt: serverTimestamp() });
-      tx.set(dirRef, { uid:user.uid, username, usernameKey, createdAt: serverTimestamp() });
-    });
+    await setDoc(userRef, { username, cash: 10000, realized: 0, createdAt: serverTimestamp() });
     state.username = username;
   } else {
     state.username = snap.data().username || user.email.split('@')[0];
-    const usernameKey = state.username.trim().toLowerCase();
-    try{
-      if(!Object.prototype.hasOwnProperty.call(snap.data(),'lastOpId')){
-        await updateDoc(userRef,{lastOpId:''});
-      }
-      const dirRef = doc(db,'userDirectory',user.uid);
-      const dirSnap = await getDoc(dirRef);
-      if(!dirSnap.exists()) await setDoc(dirRef, { uid:user.uid, username:state.username, usernameKey, createdAt:serverTimestamp() });
-    }catch(e){ console.warn('Could not ensure account migration data:', e); }
   }
   pendingUsername = null;
   document.getElementById('whoUsername').textContent = state.username;
@@ -582,10 +559,6 @@ onAuthStateChanged(auth, async (user) => {
   }catch(e){ state.isAdmin = false; }
   document.getElementById('debugPanel').classList.toggle('hidden', !state.isAdmin);
   document.getElementById('adminPill').classList.toggle('hidden', !state.isAdmin);
-  document.getElementById('uploadTitle').textContent = state.isAdmin ? 'Drop one or more battle report .html files here' : 'Market reports are published by the admin';
-  document.getElementById('uploadSubtext').textContent = state.isAdmin ? 'or click to browse — select one or more files; each file is validated before publication' : 'The trading market uses admin-published prices so browser clients cannot change the prices used for trades.';
-  document.getElementById('dropzone').style.cursor = state.isAdmin ? 'pointer' : 'default';
-  document.getElementById('fileInput').disabled = !state.isAdmin;
   if(state.isAdmin) addUidBoxIfMissing(user.uid);
 
   subscribeToMarket();
@@ -647,13 +620,12 @@ function validateAndParseReportHTML(text){
 }
 
 async function submitReport(players, filename, isSynthetic){
-  if(!state.isAdmin) throw new Error('Only an admin can publish battle reports.');
   const counterRef = doc(db, 'counters', 'day');
   const reportsCol = collection(db, 'reports');
   let assignedDay;
   await runTransaction(db, async (tx) => {
     const counterSnap = await tx.get(counterRef);
-    const current = counterSnap.exists() ? Number(counterSnap.data().value || 0) : 0;
+    const current = counterSnap.exists() ? counterSnap.data().value : 0;
     assignedDay = current + 1;
     tx.set(counterRef, { value: assignedDay });
     const newReportRef = doc(reportsCol);
@@ -665,47 +637,25 @@ async function submitReport(players, filename, isSynthetic){
   return assignedDay;
 }
 
-async function publishMarketSnapshot(){
-  if(!state.isAdmin || !state.reports.length) return;
-  const latest = state.reports[state.reports.length - 1];
-  const markerRef = doc(db,'market','state');
-  const markerSnap = await getDoc(markerRef);
-  if(markerSnap.exists() && markerSnap.data().lastPublishedReportId === latest.id) return;
-  const entries = Object.keys(state.players).map(symbol => ({
-    symbol, price:currentPrice(symbol), profession:state.players[symbol].profession||'Unknown',
-    faction:state.players[symbol].faction||'Unknown'
-  })).filter(x => x.price != null);
-  for(let i=0;i<entries.length;i+=300){
-    const batch = writeBatch(db);
-    entries.slice(i,i+300).forEach(e => {
-      const hist = state.players[e.symbol].history || [];
-      const dayStats = hist.filter(h => h.day === state.day).slice(-1)[0] || {};
-      batch.set(doc(db,'market','prices','symbols',e.symbol), { ...e, deaths:Number(dayStats.deaths||0), day:state.day, publishedAt:serverTimestamp() });
-      batch.set(doc(db,'market','days',String(state.day),'players',e.symbol), { ...e, deaths:Number(dayStats.deaths||0), day:state.day, publishedAt:serverTimestamp() });
-    });
-    await batch.commit();
-  }
-  await setDoc(markerRef,{lastPublishedReportId:latest.id,day:state.day,publishedAt:serverTimestamp()},{merge:true});
-}
-
 function readFileAsText(file){
-  return new Promise((resolve,reject)=>{
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload=e=>resolve(e.target.result);
-    reader.onerror=()=>reject(new Error('Could not read file.'));
+    reader.onload = e => resolve(e.target.result);
+    reader.onerror = () => reject(new Error('Could not read file.'));
     reader.readAsText(file);
   });
 }
 
 async function handleUpload(file){
   try{
-    if(!state.isAdmin){ addReportLogRow(file.name,'REJECTED: only an admin can publish reports.',true); return; }
     const text = await readFileAsText(file);
     const result = validateAndParseReportHTML(text);
-    if(!result.valid){ addReportLogRow(file.name,'REJECTED: '+result.error,true); return; }
-    const day = await submitReport(result.players,file.name,false);
-    addReportLogRow(file.name,'Accepted — day '+day+', '+result.players.length+' stocks',false);
-  }catch(err){ addReportLogRow(file.name,'ERROR: '+err.message,true); }
+    if(!result.valid){ addReportLogRow(file.name, 'REJECTED: ' + result.error, true); return; }
+    const day = await submitReport(result.players, file.name, false);
+    addReportLogRow(file.name, 'Accepted — day ' + day + ', ' + result.players.length + ' stocks', false);
+  }catch(err){
+    addReportLogRow(file.name, 'ERROR: ' + err.message, true);
+  }
 }
 
 function addReportLogRow(filename, msg, isError){
@@ -726,7 +676,6 @@ function subscribeToMarket(){
     state.elo = computeAllElo();
     checkAndSettlePositions();
     renderAll();
-    if(state.isAdmin) publishMarketSnapshot().catch(err => console.warn('Market snapshot publish failed:', err));
   });
 }
 function subscribeToUserDoc(userRef){
@@ -741,7 +690,7 @@ function subscribeToPositions(uid){
   const q = collection(db, 'users', uid, 'positions');
   unsubPositions = onSnapshot(q, (snap) => {
     state.positions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderPositions(); renderHistory(); renderStats();
+    renderPositions(); renderAssets(); renderHistory(); renderStats();
   });
 }
 
@@ -992,108 +941,118 @@ document.querySelectorAll('.type-tabs button').forEach(btn => {
 document.querySelector('.type-tabs button[data-type="call"]').click();
 
 async function buyContract(){
-  const symbol=document.getElementById('optSymbol').value;
-  const expiryDays=parseInt(document.getElementById('optExpiry').value,10);
-  const qty=parseInt(document.getElementById('optQty').value,10);
-  const msgEl=document.getElementById('buyMsg'); msgEl.className='msg'; msgEl.textContent='';
-  if(!symbol){msgEl.className='msg err';msgEl.textContent='Pick a stock first.';return;}
-  if(!Number.isInteger(expiryDays)||expiryDays<1){msgEl.className='msg err';msgEl.textContent='Expiry must be at least 1 day out.';return;}
-  if(!Number.isInteger(qty)||qty<1){msgEl.className='msg err';msgEl.textContent='Enter a valid contract quantity.';return;}
+  const symbol = document.getElementById('optSymbol').value;
+  const expiryDays = parseInt(document.getElementById('optExpiry').value,10);
+  const qty = parseInt(document.getElementById('optQty').value,10);
+  const msgEl = document.getElementById('buyMsg');
+  msgEl.className='msg'; msgEl.textContent='';
+
+  if(!symbol){ msgEl.className='msg err'; msgEl.textContent='Pick a stock first.'; return; }
+  if(isNaN(expiryDays)||expiryDays<1){ msgEl.className='msg err'; msgEl.textContent='Expiry must be at least 1 day out.'; return; }
+  if(isNaN(qty)||qty<1){ msgEl.className='msg err'; msgEl.textContent='Enter a valid contract quantity.'; return; }
+
+  if(state.tradeType === 'swap'){
+    const threshold = parseInt(document.getElementById('swapThreshold').value,10);
+    const notional = parseFloat(document.getElementById('swapNotional').value);
+    if(isNaN(threshold)||threshold<1){ msgEl.className='msg err'; msgEl.textContent='Enter a valid trigger threshold.'; return; }
+    if(isNaN(notional)||notional<=0){ msgEl.className='msg err'; msgEl.textContent='Enter a valid notional payout.'; return; }
+    const calc = computeSwapPremium(symbol, threshold, notional, expiryDays);
+    const totalCost = Math.round(calc.premium*qty*100)/100;
+    if(totalCost > state.cash){ msgEl.className='msg err'; msgEl.textContent='Not enough cash. Need ' + fmtMoney(totalCost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
+    const positionData = {
+      type:'swap', symbol, threshold, notional, expiryDay: state.day+expiryDays,
+      qty, premium: calc.premium, boughtDay: state.day, status:'open', settlePrice:null, dismissed:false
+    };
+    await commitTrade(positionData, totalCost, 'Bought ' + qty + 'x ' + symbol + ' elimination swap (trigger: deaths >= ' + threshold + ')', msgEl);
+  } else {
+    const strike = parseFloat(document.getElementById('optStrike').value);
+    if(isNaN(strike)||strike<=0){ msgEl.className='msg err'; msgEl.textContent='Enter a valid strike price.'; return; }
+    const calc = computeOptionPremium(symbol, strike, expiryDays, state.tradeType==='put');
+    if(!calc){ msgEl.className='msg err'; msgEl.textContent='No price data for that stock yet.'; return; }
+    const totalCost = Math.round(calc.premium*qty*100)/100;
+    if(totalCost > state.cash){ msgEl.className='msg err'; msgEl.textContent='Not enough cash. Need ' + fmtMoney(totalCost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
+    const positionData = {
+      type: state.tradeType, symbol, strike, expiryDay: state.day+expiryDays,
+      qty, premium: calc.premium, boughtDay: state.day, status:'open', settlePrice:null, dismissed:false
+    };
+    await commitTrade(positionData, totalCost, 'Bought ' + qty + 'x ' + symbol + ' $' + strike.toFixed(2) + ' ' + state.tradeType, msgEl);
+  }
+}
+
+async function commitTrade(positionData, totalCost, successMsg, msgEl){
   try{
-    const userRef=doc(db,'users',state.uid), marketRef=doc(db,'market','prices','symbols',symbol);
-    const opId=operationId('derivbuy'), opRef=doc(db,'operations',opId);
-    let success='';
-    await runTransaction(db,async tx=>{
-      const userSnap=await tx.get(userRef), marketSnap=await tx.get(marketRef);
-      if(!marketSnap.exists())throw new Error('No trusted market price is published for that player yet.');
-      const user=userSnap.data(),price=Number(marketSnap.data().price),previousOpId=String(user.lastOpId||'');
-      let positionData, totalCost;
-      if(state.tradeType==='swap'){
-        const threshold=parseInt(document.getElementById('swapThreshold').value,10),notional=parseFloat(document.getElementById('swapNotional').value);
-        if(!Number.isInteger(threshold)||threshold<1)throw new Error('Enter a valid trigger threshold.');
-        if(!isFinite(notional)||notional<=0)throw new Error('Enter a valid notional payout.');
-        const calc=computeSwapPremium(symbol,threshold,notional,expiryDays); totalCost=calc.premium*qty;
-        positionData={type:'swap',symbol,threshold,notional,expiryDay:state.day+expiryDays,qty,premium:calc.premium,boughtDay:state.day,status:'open',settlePrice:null,dismissed:false};
-        success='Bought '+qty+'x '+symbol+' elimination swap.';
-      }else{
-        const strike=parseFloat(document.getElementById('optStrike').value);
-        if(!isFinite(strike)||strike<=0)throw new Error('Enter a valid strike price.');
-        const calc=computeOptionPremium(symbol,strike,expiryDays,state.tradeType==='put');
-        if(!calc)throw new Error('No price data for that stock yet.');
-        totalCost=Math.round(calc.premium*qty*100)/100;
-        positionData={type:state.tradeType,symbol,strike,expiryDay:state.day+expiryDays,qty,premium:calc.premium,boughtDay:state.day,status:'open',settlePrice:null,dismissed:false};
-        success='Bought '+qty+'x '+symbol+' $'+strike.toFixed(2)+' '+state.tradeType+'.';
-      }
-      if(Number(user.cash)<totalCost)throw new Error('Not enough cash. Need '+fmtMoney(totalCost)+', have '+fmtMoney(Number(user.cash))+'.');
-      positionData.lastOpId=opId;
-      tx.set(opRef,{type:'derivative_buy',createdBy:state.uid,lastOpId:opId,previousOpId,fromUid:state.uid,derivativeType:positionData.type,symbol,positionId:opId,qty,cost:totalCost,premium:positionData.premium,strike:positionData.strike??null,threshold:positionData.threshold??null,notional:positionData.notional??null,expiryDay:positionData.expiryDay,boughtDay:positionData.boughtDay,marketPrice:price,cashDelta:-totalCost,realizedDelta:0,day:state.day,createdAt:serverTimestamp()});
-      tx.update(userRef,{cash:Number(user.cash)-totalCost,realized:Number(user.realized||0),lastOpId:opId});
-      tx.set(doc(db,'users',state.uid,'positions',opId),positionData);
-    });
-    msgEl.className='msg ok';msgEl.textContent=success+' Expiring day '+(state.day+expiryDays)+'.';
-  }catch(err){msgEl.className='msg err';msgEl.textContent='Trade failed: '+err.message;}
+    await addDoc(collection(db,'users',state.uid,'positions'), positionData);
+    const userRef = doc(db,'users',state.uid);
+    await updateDoc(userRef, { cash: state.cash - totalCost });
+    msgEl.className='msg ok'; msgEl.textContent = successMsg + ', expiring day ' + positionData.expiryDay + '.';
+  }catch(err){
+    msgEl.className='msg err'; msgEl.textContent = 'Trade failed: ' + err.message;
+  }
 }
 document.getElementById('buyBtn').addEventListener('click', buyContract);
 
-async function settleOptionPosition(pos,settleDay){
-  const snap=await getDoc(doc(db,'market','days',String(settleDay),'players',pos.symbol));
-  if(!snap.exists()) throw new Error('No trusted market snapshot exists for settlement day '+settleDay+'.');
-  const settlePrice=Number(snap.data().price);
-  const payoff=pos.type==='put' ? Math.max(0,pos.strike-settlePrice)*pos.qty : Math.max(0,settlePrice-pos.strike)*pos.qty;
-  await applySettlement(pos,settlePrice,payoff,settleDay,false);
+async function settleOptionPosition(pos, settleDay){
+  const settlePrice = priceAtOrBefore(pos.symbol, settleDay) ?? currentPrice(pos.symbol) ?? 0;
+  const payoff = pos.type === 'put'
+    ? Math.max(0, pos.strike - settlePrice) * pos.qty
+    : Math.max(0, settlePrice - pos.strike) * pos.qty;
+  await applySettlement(pos, settlePrice, payoff);
 }
-async function settleSwapPosition(pos,triggered,triggerDay){
-  const settlePrice=currentPrice(pos.symbol) ?? 0;
-  const payoff=triggered ? pos.notional*pos.qty : 0;
-  await applySettlement(pos,settlePrice,payoff,triggered?triggerDay:state.day,false);
+async function settleSwapPosition(pos, triggered){
+  const settlePrice = currentPrice(pos.symbol) ?? 0;
+  const payoff = triggered ? pos.notional * pos.qty : 0;
+  await applySettlement(pos, settlePrice, payoff);
 }
-async function applySettlement(pos,settlePrice,payoff,settleDay,closedEarly){
-  const cost=Number(pos.premium||0)*Number(pos.qty||0), status=payoff>0?'won':'lost';
-  const userRef=doc(db,'users',state.uid), posRef=doc(db,'users',state.uid,'positions',pos.id), opId=operationId('derivsettle'), opRef=doc(db,'operations',opId);
-  await runTransaction(db,async tx=>{
-    const [userSnap,posSnap]=await Promise.all([tx.get(userRef),tx.get(posRef)]);
-    if(!posSnap.exists()||posSnap.data().status!=='open')throw new Error('That position is no longer open.');
-    const live=posSnap.data(), user=userSnap.data(), previousOpId=String(user.lastOpId||'');
-    tx.set(opRef,{type:'derivative_settle',createdBy:state.uid,lastOpId:opId,previousOpId,fromUid:state.uid,derivativeType:live.type,symbol:live.symbol,positionId:pos.id,qty:live.qty,premium:live.premium,strike:live.strike??null,threshold:live.threshold??null,notional:live.notional??null,boughtDay:live.boughtDay,expiryDay:live.expiryDay,settleDay,settlePrice,payoff,cashDelta:payoff,realizedDelta:payoff-(Number(live.premium||0)*Number(live.qty||0)),status,triggered:(live.type==='swap' && payoff>0),createdAt:serverTimestamp(),closedEarly:!!closedEarly});
-    tx.update(userRef,{cash:Number(user.cash)+payoff,realized:Number(user.realized||0)+payoff-(Number(live.premium||0)*Number(live.qty||0)),lastOpId:opId});
-    tx.update(posRef,{status,settlePrice,payoff,lastOpId:opId});
-  });
+async function applySettlement(pos, settlePrice, payoff){
+  const cost = pos.premium * pos.qty;
+  const status = payoff > 0 ? 'won' : 'lost';
+  await updateDoc(doc(db,'users',state.uid,'positions',pos.id), { status, settlePrice, payoff });
+  const userRef = doc(db,'users',state.uid);
+  await updateDoc(userRef, { cash: state.cash + payoff, realized: state.realized + (payoff - cost) });
 }
+
 async function checkAndSettlePositions(){
   for(const pos of state.positions){
-    if(pos.status!=='open' || pos.type==='stock')continue;
-    try{
-      if(pos.type==='swap'){
-        const relevantReports=state.reports.filter(r=>r.day>pos.boughtDay&&r.day<=pos.expiryDay).sort((a,b)=>a.day-b.day);
-        let triggeredDay=null;
-        for(const rep of relevantReports){ const row=rep.players.find(p=>p.name===pos.symbol); if(row && row.deaths>=pos.threshold){triggeredDay=rep.day;break;} }
-        if(triggeredDay!=null) await settleSwapPosition(pos,true,triggeredDay);
-        else if(state.day>=pos.expiryDay) await settleSwapPosition(pos,false,state.day);
-      }else if(state.day>=pos.expiryDay){
-        const ph=state.players[pos.symbol]?.priceHistory||[];
-        const usable=ph.filter(x=>x.day>pos.boughtDay&&x.day<=pos.expiryDay).slice(-1)[0];
-        const day=usable?.day ?? pos.boughtDay;
-        if(day>pos.boughtDay) await settleOptionPosition(pos,day);
+    if(pos.status !== 'open' || pos.type === 'stock') continue;
+    if(pos.type === 'swap'){
+      const relevantReports = state.reports
+        .filter(r => r.day > pos.boughtDay && r.day <= pos.expiryDay)
+        .sort((a,b) => a.day - b.day);
+      let triggered = false;
+      for(const rep of relevantReports){
+        const row = rep.players.find(p => p.name === pos.symbol);
+        if(row && row.deaths >= pos.threshold){ triggered = true; break; }
       }
-    }catch(err){ console.warn('Could not settle position '+pos.id+':',err.message); }
+      if(triggered){ await settleSwapPosition(pos, true); }
+      else if(state.day >= pos.expiryDay){ await settleSwapPosition(pos, false); }
+    } else {
+      if(state.day >= pos.expiryDay){ await settleOptionPosition(pos, pos.expiryDay); }
+    }
   }
 }
+
 async function dismissPosition(posId){
-  await updateDoc(doc(db,'users',state.uid,'positions',posId),{dismissed:true});
+  await updateDoc(doc(db,'users',state.uid,'positions',posId), { dismissed: true });
 }
+
 async function closePositionEarly(posId){
-  const pos=state.positions.find(p=>p.id===posId);
-  if(!pos||pos.status!=='open'||pos.type==='stock')return;
-  if(!confirm('Close this position now and lock in its current value?'))return;
-  const price=currentPrice(pos.symbol)??0;
+  const pos = state.positions.find(p => p.id === posId);
+  if(!pos || pos.status !== 'open' || pos.type==='stock') return;
+  if(!confirm('Close this position now and lock in its current value?')) return;
+  const price = currentPrice(pos.symbol) ?? 0;
   let payoff;
-  if(pos.type==='swap'){
-    const remaining=Math.max(1,pos.expiryDay-state.day);
-    payoff=computeSwapPremium(pos.symbol,pos.threshold,pos.notional,remaining).premium*pos.qty;
-  }else payoff=(pos.type==='put'?Math.max(0,pos.strike-price):Math.max(0,price-pos.strike))*pos.qty;
-  payoff=Math.round(payoff*100)/100;
-  try{ await applySettlement(pos,price,payoff,state.day,true); }
-  catch(err){ alert('Could not close position: '+err.message); }
+  if(pos.type === 'swap'){
+    const remaining = Math.max(1, pos.expiryDay - state.day);
+    payoff = computeSwapPremium(pos.symbol, pos.threshold, pos.notional, remaining).premium * pos.qty;
+  } else {
+    payoff = (pos.type==='put' ? Math.max(0,pos.strike-price) : Math.max(0,price-pos.strike)) * pos.qty;
+  }
+  payoff = Math.round(payoff*100)/100;
+  try{
+    await updateDoc(doc(db,'users',state.uid,'positions',pos.id), { status: payoff>0?'won':'lost', settlePrice: price, payoff, closedEarly: true });
+    const userRef = doc(db,'users',state.uid);
+    await updateDoc(userRef, { cash: state.cash + payoff, realized: state.realized + (payoff - pos.premium*pos.qty) });
+  }catch(err){ alert('Could not close position: ' + err.message); }
 }
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -1254,96 +1213,81 @@ function renderPremiumPreview(){
   }
 }
 
+// NOTE: Client-side Firestore writes are not a security boundary.
+// True anti-exploit enforcement requires server-side trade processing (e.g. Cloud Function/Admin SDK)
+// or rules that validate execution price against a trusted market-price document.
 function stockPositionId(symbol){
   return 'stock_' + encodeURIComponent(symbol).replace(/\./g,'%2E');
 }
-function operationId(prefix){
-  return prefix + '_' + state.uid + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,10);
-}
 function getStockPositions(){
-  return state.positions.filter(p=>p.type==='stock' && p.status==='open' && Number(p.qty)>0);
+  return state.positions.filter(p => p.type==='stock' && p.status==='open' && p.qty>0);
 }
-function setAssetSymbol(symbol){ state.assetSymbol=symbol||''; const sel=document.getElementById('assetSymbol'); if(sel) sel.value=state.assetSymbol; renderAssetPreview(); }
+function setAssetSymbol(symbol){
+  state.assetSymbol = symbol || '';
+  const sel = document.getElementById('assetSymbol');
+  if(sel) sel.value = state.assetSymbol;
+  renderAssetPreview();
+}
 function renderAssetPreview(){
-  const symbol=document.getElementById('assetSymbol')?.value || state.assetSymbol || '';
-  const qty=parseInt(document.getElementById('assetQty')?.value,10)||1;
-  const price=currentPrice(symbol);
-  document.getElementById('assetCurrent').textContent=price==null?'—':fmtMoney(price);
-  document.getElementById('assetShares').textContent=symbol?String(qty):'—';
-  document.getElementById('assetTotal').textContent=price==null?'—':fmtMoney(price*qty);
-  const btn=document.getElementById('assetBuyBtn');
-  btn.disabled=price==null || qty<1;
-  btn.textContent=symbol&&price!=null?'Buy '+qty+'x '+symbol:'Select a stock first';
+  const symbol = document.getElementById('assetSymbol')?.value || state.assetSymbol || '';
+  const qty = parseInt(document.getElementById('assetQty')?.value,10) || 1;
+  const price = currentPrice(symbol);
+  document.getElementById('assetCurrent').textContent = price==null ? '—' : fmtMoney(price);
+  document.getElementById('assetShares').textContent = symbol ? String(qty) : '—';
+  document.getElementById('assetTotal').textContent = price==null ? '—' : fmtMoney(price*qty);
+  const btn = document.getElementById('assetBuyBtn');
+  btn.disabled = price==null || qty<1;
+  btn.textContent = symbol && price!=null ? 'Buy ' + qty + 'x ' + symbol : 'Select a stock first';
 }
 async function buyStock(){
-  const symbol=document.getElementById('assetSymbol').value;
-  const qty=parseInt(document.getElementById('assetQty').value,10);
-  const msg=document.getElementById('assetMsg'); msg.className='msg'; msg.textContent='';
-  if(!symbol){msg.className='msg err';msg.textContent='Pick a stock first.';return;}
-  if(!Number.isInteger(qty)||qty<1){msg.className='msg err';msg.textContent='Enter a valid share quantity.';return;}
+  const symbol = document.getElementById('assetSymbol').value;
+  const qty = parseInt(document.getElementById('assetQty').value,10);
+  const msg = document.getElementById('assetMsg');
+  msg.className='msg'; msg.textContent='';
+  const price = currentPrice(symbol);
+  if(!symbol || price==null){ msg.className='msg err'; msg.textContent='Pick a stock first.'; return; }
+  if(isNaN(qty) || qty<1){ msg.className='msg err'; msg.textContent='Enter a valid share quantity.'; return; }
+  const cost = Math.round(price*qty*100)/100;
+  if(cost > state.cash){ msg.className='msg err'; msg.textContent='Not enough cash. Need ' + fmtMoney(cost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
   try{
-    const userRef=doc(db,'users',state.uid), posRef=doc(db,'users',state.uid,'positions',stockPositionId(symbol));
-    const marketRef=doc(db,'market','prices','symbols',symbol), opId=operationId('stockbuy'), opRef=doc(db,'operations',opId);
-    await runTransaction(db,async tx=>{
-      const userSnap=await tx.get(userRef), posSnap=await tx.get(posRef), marketSnap=await tx.get(marketRef);
-      if(!userSnap.exists()) throw new Error('Your account record is missing.');
-      if(!marketSnap.exists()) throw new Error('No trusted market price is published for that player yet.');
-      const user=userSnap.data(), market=marketSnap.data(), price=Number(market.price), cost=price*qty, previousOpId=String(user.lastOpId||'');
-      if(Number(user.cash)<cost) throw new Error('Not enough cash. Need '+fmtMoney(cost)+', have '+fmtMoney(Number(user.cash))+'.');
-      const existing=posSnap.exists()?posSnap.data():null, oldQty=existing&&existing.status==='open'?Number(existing.qty||0):0, oldAvg=existing&&existing.status==='open'?Number(existing.avgCost||0):0;
-      const newQty=oldQty+qty, newAvg=((oldQty*oldAvg)+(qty*price))/newQty;
-      tx.set(opRef,{type:'stock_buy',createdBy:state.uid,lastOpId:opId,previousOpId,fromUid:state.uid,symbol,positionId:stockPositionId(symbol),qty,price,cashDelta:-cost,realizedDelta:0,day:state.day,createdAt:serverTimestamp()});
-      tx.update(userRef,{cash:Number(user.cash)-cost,realized:Number(user.realized||0),lastOpId:opId});
-      tx.set(posRef,{type:'stock',symbol,qty:newQty,avgCost:newAvg,boughtDay:existing?.boughtDay??state.day,status:'open',dismissed:false,lastOpId:opId});
-    });
-    msg.className='msg ok';msg.textContent='Bought '+qty+' share'+(qty===1?'':'s')+' of '+symbol+'.'; renderAssets(); renderStats();
-  }catch(err){msg.className='msg err';msg.textContent='Stock purchase failed: '+err.message;}
+    const ref = doc(db,'users',state.uid,'positions',stockPositionId(symbol));
+    const snap = await getDoc(ref);
+    const existing = snap.exists() ? snap.data() : null;
+    if(existing && existing.type==='stock' && existing.status==='open'){
+      const newQty = Number(existing.qty||0) + qty;
+      const newAvg = ((Number(existing.qty||0)*Number(existing.avgCost||0)) + cost) / newQty;
+      await setDoc(ref, { type:'stock', symbol, qty:newQty, avgCost:Math.round(newAvg*100)/100, boughtDay:existing.boughtDay ?? state.day, status:'open', dismissed:false });
+    } else {
+      await setDoc(ref, { type:'stock', symbol, qty, avgCost:price, boughtDay:state.day, status:'open', dismissed:false });
+    }
+    await updateDoc(doc(db,'users',state.uid), { cash: state.cash - cost });
+    renderAssets(); renderStats();
+    msg.className='msg ok'; msg.textContent='Bought ' + qty + ' share' + (qty===1?'':'s') + ' of ' + symbol + ' at ' + fmtMoney(price) + '.';
+  }catch(err){ msg.className='msg err'; msg.textContent='Stock purchase failed: ' + err.message; }
 }
-async function sellStock(symbol,sellQty){
-  const qty=Math.floor(Number(sellQty)); if(!symbol||qty<1)return;
-  const msg=document.getElementById('assetMsg'); msg.className='msg'; msg.textContent='';
+async function sellStock(symbol, sellQty){
+  const pos = state.positions.find(p => p.type==='stock' && p.status==='open' && p.symbol===symbol);
+  if(!pos) return;
+  sellQty = Math.floor(Number(sellQty));
+  if(!sellQty || sellQty<1) return;
+  if(sellQty > pos.qty) { alert('You only own ' + pos.qty + ' share' + (pos.qty===1?'':'s') + ' of ' + symbol + '.'); return; }
+  const price = currentPrice(symbol);
+  if(price==null) return;
+  const proceeds = Math.round(price*sellQty*100)/100;
+  const pnl = Math.round((price - Number(pos.avgCost||0))*sellQty*100)/100;
+  if(!confirm('Sell ' + sellQty + 'x ' + symbol + ' at ' + fmtMoney(price) + ' for ' + fmtMoney(proceeds) + '?')) return;
   try{
-    const userRef=doc(db,'users',state.uid), posRef=doc(db,'users',state.uid,'positions',stockPositionId(symbol));
-    const marketRef=doc(db,'market','prices','symbols',symbol), opId=operationId('stocksell'), opRef=doc(db,'operations',opId);
-    await runTransaction(db,async tx=>{
-      const userSnap=await tx.get(userRef), posSnap=await tx.get(posRef), marketSnap=await tx.get(marketRef);
-      if(!posSnap.exists())throw new Error('You do not own this stock.');
-      if(!marketSnap.exists())throw new Error('No trusted market price is published for that player yet.');
-      const user=userSnap.data(),pos=posSnap.data(),price=Number(marketSnap.data().price),owned=Number(pos.qty||0),previousOpId=String(user.lastOpId||'');
-      if(pos.type!=='stock'||pos.status!=='open'||!Number.isInteger(qty)||qty>owned)throw new Error('You only own '+owned+' share'+(owned===1?'':'s')+' of '+symbol+'.');
-      const proceeds=price*qty,pnl=(price-Number(pos.avgCost||0))*qty,remaining=owned-qty;
-      tx.set(opRef,{type:'stock_sell',createdBy:state.uid,lastOpId:opId,previousOpId,fromUid:state.uid,symbol,positionId:stockPositionId(symbol),qty,price,proceeds,cashDelta:proceeds,realizedDelta:pnl,day:state.day,createdAt:serverTimestamp()});
-      tx.update(userRef,{cash:Number(user.cash)+proceeds,realized:Number(user.realized||0)+pnl,lastOpId:opId});
-      if(remaining>0)tx.update(posRef,{qty:remaining,lastSellPrice:price,lastSellDay:state.day,lastOpId:opId});
-      else tx.update(posRef,{qty:0,status:'sold',sellPrice:price,sellDay:state.day,payoff:proceeds,realizedPnl:pnl,dismissed:false,lastOpId:opId});
-    });
-    msg.className='msg ok';msg.textContent='Sold '+qty+' share'+(qty===1?'':'s')+' of '+symbol+'.'; renderAssets(); renderStats();
-  }catch(err){msg.className='msg err';msg.textContent='Could not sell stock: '+err.message;}
+    const ref = doc(db,'users',state.uid,'positions',pos.id);
+    const remaining = pos.qty - sellQty;
+    if(remaining > 0){
+      await updateDoc(ref, { qty: remaining, lastSellPrice: price, lastSellDay: state.day });
+    } else {
+      await updateDoc(ref, { qty: 0, status:'sold', sellPrice: price, sellDay: state.day, payoff: proceeds, realizedPnl: pnl, dismissed:false });
+    }
+    await updateDoc(doc(db,'users',state.uid), { cash: state.cash + proceeds, realized: state.realized + pnl });
+    renderAssets(); renderStats();
+  }catch(err){ alert('Could not sell stock: ' + err.message); }
 }
-async function sendCash(){
-  const recipient=document.getElementById('transferUsername').value.trim().toLowerCase();
-  const amount=Math.round(Number(document.getElementById('transferAmount').value)*100)/100;
-  const msg=document.getElementById('transferMsg'); msg.className='msg'; msg.textContent='';
-  if(!recipient){msg.className='msg err';msg.textContent='Enter a recipient username.';return;}
-  if(recipient===String(state.username||'').trim().toLowerCase()){msg.className='msg err';msg.textContent='You cannot send cash to yourself.';return;}
-  if(!isFinite(amount)||amount<=0){msg.className='msg err';msg.textContent='Enter a valid amount.';return;}
-  try{
-    const dirSnap=await getDocs(query(collection(db,'userDirectory'),where('usernameKey','==',recipient)));
-    if(dirSnap.empty)throw new Error('No player found with that username.');
-    const toUid=dirSnap.docs[0].data().uid, fromRef=doc(db,'users',state.uid), toRef=doc(db,'users',toUid), opId=operationId('transfer'), opRef=doc(db,'operations',opId);
-    await runTransaction(db,async tx=>{
-      const fromSnap=await tx.get(fromRef),toSnap=await tx.get(toRef);
-      if(!fromSnap.exists()||!toSnap.exists())throw new Error('Player account not found.');
-      const from=fromSnap.data(),to=toSnap.data(),fromPreviousOpId=String(from.lastOpId||''),toPreviousOpId=String(to.lastOpId||'');
-      if(Number(from.cash||0)<amount)throw new Error('Not enough cash. You have '+fmtMoney(Number(from.cash||0))+'.');
-      tx.set(opRef,{type:'transfer',createdBy:state.uid,lastOpId:opId,fromPreviousOpId,toPreviousOpId,fromUid:state.uid,toUid,amount,cashDelta:-amount,recipientCashDelta:amount,realizedDelta:0,day:state.day,createdAt:serverTimestamp()});
-      tx.update(fromRef,{cash:Math.round((Number(from.cash)-amount)*100)/100,realized:Number(from.realized||0),lastOpId:opId});
-      tx.update(toRef,{cash:Math.round((Number(to.cash)+amount)*100)/100,realized:Number(to.realized||0),lastOpId:opId});
-    });
-    msg.className='msg ok';msg.textContent='Sent '+fmtMoney(amount)+' to '+escapeHtml(recipient)+'.';
-  }catch(err){msg.className='msg err';msg.textContent='Cash transfer failed: '+err.message;}
-}
-
 function renderAssets(){
   const sel = document.getElementById('assetSymbol');
   if(!sel) return;
@@ -1530,7 +1474,7 @@ function renderEloChart(entries){
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
-dropzone.addEventListener('click', () => { if(state.isAdmin) fileInput.click(); });
+dropzone.addEventListener('click', () => fileInput.click());
 async function handleUploadBatch(fileList){
   const files = Array.from(fileList || []).filter(f => /\.html?$/i.test(f.name));
   if(!files.length) return;
@@ -1576,7 +1520,6 @@ navElo.addEventListener('click', () => { activateNav(navElo, viewElo); renderElo
 document.getElementById('assetSymbol').addEventListener('change', e => { state.assetSymbol=e.target.value; renderAssetPreview(); });
 document.getElementById('assetQty').addEventListener('input', renderAssetPreview);
 document.getElementById('assetBuyBtn').addEventListener('click', buyStock);
-document.getElementById('sendCashBtn').addEventListener('click', sendCash);
 document.getElementById('historyFilters').querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
   state.historyFilter = btn.dataset.filter;
   document.getElementById('historyFilters').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
