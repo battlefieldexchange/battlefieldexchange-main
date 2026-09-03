@@ -87,6 +87,10 @@
   .report-log .row span:first-child{color:var(--text); flex-shrink:0;}
   .report-log .row .del-report{ font-family:var(--mono); font-size:10px; background:transparent; border:1px solid var(--red); color:var(--red); padding:1px 7px; border-radius:2px; cursor:pointer; }
   .report-log .row .del-report:hover{background:rgba(255,93,93,0.12);}
+  #dupeResults .del-report{ font-family:var(--mono); font-size:10px; background:transparent; border:1px solid var(--red); color:var(--red); padding:1px 7px; border-radius:2px; cursor:pointer; margin-left:8px; }
+  #dupeResults .del-report:hover{background:rgba(255,93,93,0.12);}
+  #dupeResults .dupe-group{ margin-bottom:8px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  #dupeResults .dupe-group div{ padding:2px 0; }
 
   .weight-row{display:grid; grid-template-columns:110px 1fr 42px; align-items:center; gap:10px; margin-bottom:10px; font-size:12px;}
   .weight-row label{color:var(--text-dim);}
@@ -315,6 +319,19 @@
             <input type="number" id="dbgJumpDay" min="0" step="1">
             <button class="debug-btn" id="dbgJumpBtn">Go</button>
           </div>
+          <div class="admin-note" style="margin-top:16px;">Valuation weights — changing these and hitting Recalculate rewrites every player's entire price history for <b>every connected trader</b> immediately, using this formula. Only visible/editable here, admin-only server-side too.</div>
+          <div class="weight-row"><label>Damage</label><input type="number" step="0.01" id="wDamage" style="width:100%"><span></span></div>
+          <div class="weight-row"><label>Healing</label><input type="number" step="0.01" id="wHealing" style="width:100%"><span></span></div>
+          <div class="weight-row"><label>Kills</label><input type="number" step="0.01" id="wKills" style="width:100%"><span></span></div>
+          <div class="weight-row"><label>Assists</label><input type="number" step="0.01" id="wAssists" style="width:100%"><span></span></div>
+          <div class="weight-row"><label>Deaths (penalty)</label><input type="number" step="0.01" id="wDeaths" style="width:100%"><span></span></div>
+          <button class="debug-btn" id="dbgRecalc">Recalculate &amp; broadcast to all clients</button>
+          <div class="msg" id="wMsg"></div>
+          <div class="debug-inline" style="margin-top:10px;">
+            <button class="debug-btn" id="dbgFindDupes">Scan existing reports for duplicate stats</button>
+            <button class="debug-btn" id="dbgMigrateReports">Clean up duplicates &amp; lock in IDs</button>
+          </div>
+          <div id="dupeResults" style="margin-top:10px; font-size:12px; color:var(--text-dim); white-space:pre-line;"></div>
         </div>
       </section>
 
@@ -471,8 +488,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
-  collection, addDoc, onSnapshot, query, orderBy,
-  runTransaction, serverTimestamp
+  collection, addDoc, onSnapshot, query, orderBy, where, getCountFromServer,
+  runTransaction, serverTimestamp, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
 // PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -499,13 +516,15 @@ const state = {
 // Fixed, non-tunable pricing model — every trader sees the same prices.
 // Each stat is scored as a z-score against the field in that report, then
 // blended into one composite that becomes the day's percentage return.
-const PRICE_WEIGHTS = { damage: 0.40, healing: 0.25, kills: 0.20, assists: 0.15, deaths: 0.35 };
+const DEFAULT_PRICE_WEIGHTS = { damage: 0.40, healing: 0.25, kills: 0.20, assists: 0.15, deaths: 0.35 };
+let PRICE_WEIGHTS = { ...DEFAULT_PRICE_WEIGHTS };
 const RETURN_SCALE = 0.05, MAX_RETURN = 0.35;
 // Elo model — damage & healing help, deaths hurt, compared head-to-head
 // against everyone else in the same report (standard multiplayer Elo).
 const ELO_WEIGHTS = { damage: 0.5, healing: 0.3, deaths: 0.6 };
 const ELO_START = 1500, ELO_K = 32;
-let unsubReports = null, unsubPositions = null, unsubUserDoc = null;
+let unsubReports = null, unsubPositions = null, unsubUserDoc = null, unsubWeights = null;
+let reportsRecheckTimer = null;
 let pendingUsername = null;
 
 // Firebase Auth only understands email/phone/OAuth identities, not "usernames" —
@@ -602,6 +621,7 @@ onAuthStateChanged(auth, async (user) => {
   subscribeToMarket();
   subscribeToUserDoc(userRef);
   subscribeToPositions(user.uid);
+  subscribeToPriceWeights();
 
   loadingScreen.classList.add('hidden');
   appRoot.classList.remove('hidden');
@@ -611,6 +631,8 @@ function teardownSubscriptions(){
   if(unsubReports){ unsubReports(); unsubReports = null; }
   if(unsubUserDoc){ unsubUserDoc(); unsubUserDoc = null; }
   if(unsubPositions){ unsubPositions(); unsubPositions = null; }
+  if(unsubWeights){ unsubWeights(); unsubWeights = null; }
+  if(reportsRecheckTimer){ clearInterval(reportsRecheckTimer); reportsRecheckTimer = null; }
 }
 
 function addUidBoxIfMissing(uid){
@@ -657,16 +679,37 @@ function validateAndParseReportHTML(text){
   return { valid:true, players };
 }
 
+async function hashReportStats(players){
+  // Fingerprint on the fields that have stayed constant across every era of the
+  // export format — name, damage, healing, assists, deaths. Everything else
+  // (profession, faction, kills, largestHit, damageTaken, largestHeal, captures)
+  // is left out on purpose since those have drifted over time.
+  const sorted = [...players].sort((a,b) => a.name.localeCompare(b.name));
+  const canonical = sorted.map(p => [
+    p.name, p.damage, p.healing, p.assists, p.deaths
+  ].join('|')).join('\n');
+  const bytes = new TextEncoder().encode(canonical);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
 async function submitReport(players, filename, isSynthetic){
+  const statsHash = await hashReportStats(players);
   const counterRef = doc(db, 'counters', 'day');
   const reportsCol = collection(db, 'reports');
+  const newReportRef = doc(reportsCol, statsHash); // deterministic ID: same stats -> same doc ID
   let assignedDay;
   await runTransaction(db, async (tx) => {
+    const existingReport = await tx.get(newReportRef);
+    if(existingReport.exists()){
+      const err = new Error('This exact report (same player stats) has already been uploaded.');
+      err.duplicate = true;
+      throw err;
+    }
     const counterSnap = await tx.get(counterRef);
     const current = counterSnap.exists() ? counterSnap.data().value : 0;
     assignedDay = current + 1;
     tx.set(counterRef, { value: assignedDay });
-    const newReportRef = doc(reportsCol);
     tx.set(newReportRef, {
       day: assignedDay, filename, uploadedBy: state.uid, uploadedByUsername: state.username,
       uploadedAt: serverTimestamp(), isSynthetic: !!isSynthetic, players
@@ -692,7 +735,7 @@ async function handleUpload(file){
     const day = await submitReport(result.players, file.name, false);
     addReportLogRow(file.name, 'Accepted — day ' + day + ', ' + result.players.length + ' stocks', false);
   }catch(err){
-    addReportLogRow(file.name, 'ERROR: ' + err.message, true);
+    addReportLogRow(file.name, (err.duplicate ? 'REJECTED: ' : 'ERROR: ') + err.message, true);
   }
 }
 
@@ -705,16 +748,126 @@ function addReportLogRow(filename, msg, isError){
   log.prepend(row);
 }
 
-function subscribeToMarket(){
-  const q = query(collection(db, 'reports'), orderBy('day'));
-  unsubReports = onSnapshot(q, (snap) => {
-    state.reports = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    state.day = state.reports.reduce((max,r) => Math.max(max, r.day), 0);
+const REPORTS_CACHE_KEY = 'bfx_reports_cache_v1';
+
+function loadCachedReports(){
+  try{
+    const raw = localStorage.getItem(REPORTS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){ return []; }
+}
+function saveCachedReports(list){
+  try{ localStorage.setItem(REPORTS_CACHE_KEY, JSON.stringify(list)); }
+  catch(e){ /* storage full/unavailable — safe to ignore, it's just a perf cache */ }
+}
+
+async function subscribeToPriceWeights(){
+  const ref = doc(db, 'settings', 'priceWeights');
+  unsubWeights = onSnapshot(ref, (snap) => {
+    // No admin has ever hit "Recalculate" yet — keep the built-in defaults.
+    PRICE_WEIGHTS = snap.exists() ? { ...DEFAULT_PRICE_WEIGHTS, ...snap.data() } : { ...DEFAULT_PRICE_WEIGHTS };
+    populateWeightInputsIfIdle();
     recomputeAllPrices();
     state.elo = computeAllElo();
-    checkAndSettlePositions();
     renderAll();
   });
+}
+
+// Admin-only: pushes new weights to Firestore. Every connected client
+// (including this one) picks it up instantly via the onSnapshot above and
+// recomputes the whole price history with the new formula — no reload needed.
+async function recalculateWeights(){
+  if(!state.isAdmin) return;
+  const read = (id, fallback) => {
+    const v = parseFloat(document.getElementById(id).value);
+    return isNaN(v) ? fallback : v;
+  };
+  const weights = {
+    damage:  read('wDamage',  PRICE_WEIGHTS.damage),
+    healing: read('wHealing', PRICE_WEIGHTS.healing),
+    kills:   read('wKills',   PRICE_WEIGHTS.kills),
+    assists: read('wAssists', PRICE_WEIGHTS.assists),
+    deaths:  read('wDeaths',  PRICE_WEIGHTS.deaths),
+  };
+  const msg = document.getElementById('wMsg');
+  try{
+    await setDoc(doc(db, 'settings', 'priceWeights'), { ...weights, updatedAt: serverTimestamp(), updatedBy: state.username });
+    if(msg){ msg.textContent = 'Broadcast — every connected trader just recalculated.'; msg.className = 'auth-msg ok'; }
+  }catch(err){
+    if(msg){ msg.textContent = 'Failed: ' + err.message; msg.className = 'auth-msg err'; }
+  }
+}
+
+function populateWeightInputsIfIdle(){
+  // Don't stomp on values the admin is mid-typing.
+  ['wDamage','wHealing','wKills','wAssists','wDeaths'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el && document.activeElement !== el) el.value = PRICE_WEIGHTS[id.slice(1).toLowerCase()];
+  });
+}
+
+async function subscribeToMarket(){
+  if(reportsRecheckTimer){ clearInterval(reportsRecheckTimer); reportsRecheckTimer = null; }
+
+  const byId = new Map(loadCachedReports().map(r => [r.id, r]));
+
+  // Paint instantly from whatever's cached so there's no blank flash while we
+  // check in with Firestore.
+  const paint = () => {
+    const list = Array.from(byId.values()).sort((a,b) => a.day - b.day);
+    state.reports = list;
+    state.day = list.reduce((max,r) => Math.max(max, r.day), 0);
+    recomputeAllPrices();
+    state.elo = computeAllElo();
+    renderAll();
+  };
+  if(byId.size) paint();
+
+  // Cheap sanity check: count() aggregation queries are billed at roughly
+  // 1/1000th of a normal read, so this is nearly free even on every load.
+  // If the live document count doesn't match what we have cached, something
+  // was deleted (or added) outside the normal flow — an admin delete, or a
+  // manual edit straight in the Firebase console — so we throw the cache
+  // away and fall back to one full resync instead of trusting stale data.
+  async function verifyAgainstServer(){
+    try{
+      const countSnap = await getCountFromServer(collection(db, 'reports'));
+      if(countSnap.data().count !== byId.size){
+        byId.clear();
+        saveCachedReports([]);
+        return true; // mismatch found — caller should resubscribe fresh
+      }
+    }catch(e){ /* transient error — keep trusting the cache for now */ }
+    return false;
+  }
+
+  if(await verifyAgainstServer()){
+    subscribeToMarket();
+    return;
+  }
+
+  const lastCachedDay = Array.from(byId.values()).reduce((max,r) => Math.max(max, r.day), 0);
+  const q = query(collection(db, 'reports'), where('day', '>', lastCachedDay), orderBy('day'));
+  unsubReports = onSnapshot(q, (snap) => {
+    snap.docChanges().forEach(change => {
+      const rep = { id: change.doc.id, ...change.doc.data() };
+      if(change.type === 'removed') byId.delete(rep.id);
+      else byId.set(rep.id, rep);
+    });
+    saveCachedReports(Array.from(byId.values()));
+    paint();
+    checkAndSettlePositions();
+  });
+
+  // Keep checking while the tab stays open, so a delete made elsewhere
+  // (admin panel or directly in the Firebase console) shows up without
+  // anyone needing to manually refresh.
+  reportsRecheckTimer = setInterval(async () => {
+    if(await verifyAgainstServer()){
+      if(unsubReports){ unsubReports(); unsubReports = null; }
+      subscribeToMarket();
+    }
+  }, 120000);
 }
 function subscribeToUserDoc(userRef){
   unsubUserDoc = onSnapshot(userRef, (snap) => {
@@ -932,6 +1085,97 @@ document.getElementById('dbgTestReport').addEventListener('click', async () => {
   catch(err){ alert('Could not create synthetic report: ' + err.message); }
 });
 
+document.getElementById('dbgFindDupes').addEventListener('click', async () => {
+  const out = document.getElementById('dupeResults');
+  out.textContent = 'Scanning ' + state.reports.length + ' existing reports…';
+
+  const byHash = {};
+  for(const rep of state.reports){
+    const hash = await hashReportStats(rep.players);
+    (byHash[hash] = byHash[hash] || []).push(rep);
+  }
+  const dupGroups = Object.values(byHash)
+    .filter(g => g.length > 1)
+    .map(g => g.sort((a,b) => a.day - b.day));
+
+  if(dupGroups.length === 0){
+    out.textContent = 'Checked ' + state.reports.length + ' reports — no duplicate stats found.';
+    return;
+  }
+
+  out.innerHTML = '<div style="color:var(--red); margin-bottom:8px;">' + dupGroups.length + ' set(s) of reports share identical player stats:</div>' +
+    dupGroups.map(group => '<div class="dupe-group">' + group.map((rep,i) =>
+      '<div>' + (i===0 ? '✓ keep — ' : '✕ dup — ') + 'Day ' + rep.day + ' · ' + escapeHtml(rep.filename) +
+      (rep.isSynthetic ? ' [synthetic]' : '') + ' · by ' + escapeHtml(rep.uploadedByUsername||'?') +
+      (i===0 ? '' : ' <button class="del-report" data-reportid="' + rep.id + '">Delete</button>') + '</div>'
+    ).join('') + '</div>').join('');
+
+  out.querySelectorAll('.del-report').forEach(btn => btn.addEventListener('click', () => deleteReport(btn.dataset.reportid)));
+});
+
+document.getElementById('dbgMigrateReports').addEventListener('click', async () => {
+  const out = document.getElementById('dupeResults');
+  out.textContent = 'Analyzing ' + state.reports.length + ' reports…';
+
+  // Stable local copy — the live listener may reassign state.reports mid-run
+  // as batches commit, so we work from a fixed snapshot taken right now.
+  const snapshot = [...state.reports];
+  const byHash = {};
+  for(const rep of snapshot){
+    const hash = await hashReportStats(rep.players);
+    (byHash[hash] = byHash[hash] || []).push({ hash, rep });
+  }
+
+  const toDelete = [];  // extra copies within a duplicate group
+  const toRekey = [];   // the one kept report per group, if not already filed at its hash ID
+
+  Object.values(byHash).forEach(group => {
+    group.sort((a,b) => a.rep.day - b.rep.day);
+    const [keep, ...extras] = group;
+    extras.forEach(e => toDelete.push(e.rep));
+    if(keep.rep.id !== keep.hash) toRekey.push(keep);
+  });
+
+  if(toDelete.length === 0 && toRekey.length === 0){
+    out.textContent = 'Checked ' + snapshot.length + ' reports — no duplicates, and every report is already filed under its duplicate-proof ID. Nothing to do.';
+    return;
+  }
+
+  const ok = confirm(
+    'Found ' + snapshot.length + ' reports.\n' +
+    toDelete.length + ' will be deleted as exact duplicates.\n' +
+    toRekey.length + ' unique report(s) will be re-filed under duplicate-proof IDs so future uploads get checked against them too.\n\n' +
+    'This cannot be undone. Continue?'
+  );
+  if(!ok){ out.textContent = 'Cancelled — no changes made.'; return; }
+
+  const ops = [];
+  toDelete.forEach(rep => ops.push({ type:'delete', rep }));
+  toRekey.forEach(({rep,hash}) => ops.push({ type:'rekey', rep, hash }));
+
+  const CHUNK = 200; // up to 2 writes per item -> up to 400 writes/batch, safely under Firestore's 500 limit
+  let done = 0;
+  out.textContent = 'Working… 0 / ' + ops.length;
+  for(let i=0; i<ops.length; i+=CHUNK){
+    const chunk = ops.slice(i, i+CHUNK);
+    const batch = writeBatch(db);
+    chunk.forEach(op => {
+      if(op.type === 'delete'){
+        batch.delete(doc(db, 'reports', op.rep.id));
+      } else {
+        const { day, filename, uploadedBy, uploadedByUsername, uploadedAt, isSynthetic, players } = op.rep;
+        batch.set(doc(db, 'reports', op.hash), { day, filename, uploadedBy, uploadedByUsername, uploadedAt, isSynthetic, players });
+        batch.delete(doc(db, 'reports', op.rep.id));
+      }
+    });
+    await batch.commit();
+    done += chunk.length;
+    out.textContent = 'Working… ' + done + ' / ' + ops.length;
+  }
+
+  out.textContent = 'Done. Deleted ' + toDelete.length + ' duplicate report(s) and re-filed ' + toRekey.length + ' report(s) under duplicate-proof IDs. New uploads will now be checked against all of them, no matter how old.';
+});
+
 document.getElementById('dbgAdvanceDay').addEventListener('click', async () => {
   const counterRef = doc(db, 'counters', 'day');
   try{
@@ -949,6 +1193,8 @@ document.getElementById('dbgJumpBtn').addEventListener('click', async () => {
   try{ await setDoc(doc(db,'counters','day'), { value: target }); }
   catch(err){ alert('Could not jump the clock: ' + err.message); }
 });
+
+document.getElementById('dbgRecalc').addEventListener('click', recalculateWeights);
 
 async function deleteReport(reportId){
   if(!confirm('Delete this report from the shared market? Prices for everyone will recompute without it.')) return;
@@ -995,11 +1241,12 @@ async function buyContract(){
     if(isNaN(threshold)||threshold<1){ msgEl.className='msg err'; msgEl.textContent='Enter a valid trigger threshold.'; return; }
     if(isNaN(notional)||notional<=0){ msgEl.className='msg err'; msgEl.textContent='Enter a valid notional payout.'; return; }
     const calc = computeSwapPremium(symbol, threshold, notional, expiryDays);
-    const totalCost = Math.round(calc.premium*qty*100)/100;
+    const premium = Math.round(calc.premium*100)/100; // round ONCE, here — this exact value is what the rules re-derive cost from
+    const totalCost = premium*qty;                    // no further rounding: must match premium*qty bit-for-bit in the rule
     if(totalCost > state.cash){ msgEl.className='msg err'; msgEl.textContent='Not enough cash. Need ' + fmtMoney(totalCost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
     const positionData = {
       type:'swap', symbol, threshold, notional, expiryDay: state.day+expiryDays,
-      qty, premium: calc.premium, boughtDay: state.day, status:'open', settlePrice:null, dismissed:false
+      qty, premium, boughtDay: state.day, status:'open', settlePrice:null, dismissed:false
     };
     await commitTrade(positionData, totalCost, 'Bought ' + qty + 'x ' + symbol + ' elimination swap (trigger: deaths >= ' + threshold + ')', msgEl);
   } else {
@@ -1007,11 +1254,12 @@ async function buyContract(){
     if(isNaN(strike)||strike<=0){ msgEl.className='msg err'; msgEl.textContent='Enter a valid strike price.'; return; }
     const calc = computeOptionPremium(symbol, strike, expiryDays, state.tradeType==='put');
     if(!calc){ msgEl.className='msg err'; msgEl.textContent='No price data for that stock yet.'; return; }
-    const totalCost = Math.round(calc.premium*qty*100)/100;
+    const premium = Math.round(calc.premium*100)/100; // round ONCE, here — this exact value is what the rules re-derive cost from
+    const totalCost = premium*qty;                    // no further rounding: must match premium*qty bit-for-bit in the rule
     if(totalCost > state.cash){ msgEl.className='msg err'; msgEl.textContent='Not enough cash. Need ' + fmtMoney(totalCost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
     const positionData = {
       type: state.tradeType, symbol, strike, expiryDay: state.day+expiryDays,
-      qty, premium: calc.premium, boughtDay: state.day, status:'open', settlePrice:null, dismissed:false
+      qty, premium, boughtDay: state.day, status:'open', settlePrice:null, dismissed:false
     };
     await commitTrade(positionData, totalCost, 'Bought ' + qty + 'x ' + symbol + ' $' + strike.toFixed(2) + ' ' + state.tradeType, msgEl);
   }
@@ -1019,9 +1267,15 @@ async function buyContract(){
 
 async function commitTrade(positionData, totalCost, successMsg, msgEl){
   try{
-    await addDoc(collection(db,'users',state.uid,'positions'), positionData);
+    const posRef = doc(collection(db,'users',state.uid,'positions'));
     const userRef = doc(db,'users',state.uid);
-    await updateDoc(userRef, { cash: state.cash - totalCost });
+    const batch = writeBatch(db);
+    // cashDelta/realizedDelta let the security rules verify this position's
+    // declared cost matches exactly what's being taken out of your cash —
+    // both writes land in the same atomic batch, so one can't happen without the other.
+    batch.set(posRef, { ...positionData, cashDelta: -totalCost, realizedDelta: 0 });
+    batch.update(userRef, { cash: state.cash - totalCost, realized: state.realized, lastTradeId: posRef.id });
+    await batch.commit();
     msgEl.className='msg ok'; msgEl.textContent = successMsg + ', expiring day ' + positionData.expiryDay + '.';
   }catch(err){
     msgEl.className='msg err'; msgEl.textContent = 'Trade failed: ' + err.message;
@@ -1044,9 +1298,12 @@ async function settleSwapPosition(pos, triggered){
 async function applySettlement(pos, settlePrice, payoff){
   const cost = pos.premium * pos.qty;
   const status = payoff > 0 ? 'won' : 'lost';
-  await updateDoc(doc(db,'users',state.uid,'positions',pos.id), { status, settlePrice, payoff });
+  const posRef = doc(db,'users',state.uid,'positions',pos.id);
   const userRef = doc(db,'users',state.uid);
-  await updateDoc(userRef, { cash: state.cash + payoff, realized: state.realized + (payoff - cost) });
+  const batch = writeBatch(db);
+  batch.update(posRef, { status, settlePrice, payoff, cashDelta: payoff, realizedDelta: payoff - cost });
+  batch.update(userRef, { cash: state.cash + payoff, realized: state.realized + (payoff - cost), lastTradeId: pos.id });
+  await batch.commit();
 }
 
 async function checkAndSettlePositions(){
@@ -1086,10 +1343,14 @@ async function closePositionEarly(posId){
     payoff = (pos.type==='put' ? Math.max(0,pos.strike-price) : Math.max(0,price-pos.strike)) * pos.qty;
   }
   payoff = Math.round(payoff*100)/100;
+  const realizedDelta = payoff - pos.premium*pos.qty;
   try{
-    await updateDoc(doc(db,'users',state.uid,'positions',pos.id), { status: payoff>0?'won':'lost', settlePrice: price, payoff, closedEarly: true });
+    const posRef = doc(db,'users',state.uid,'positions',pos.id);
     const userRef = doc(db,'users',state.uid);
-    await updateDoc(userRef, { cash: state.cash + payoff, realized: state.realized + (payoff - pos.premium*pos.qty) });
+    const batch = writeBatch(db);
+    batch.update(posRef, { status: payoff>0?'won':'lost', settlePrice: price, payoff, closedEarly: true, cashDelta: payoff, realizedDelta });
+    batch.update(userRef, { cash: state.cash + payoff, realized: state.realized + realizedDelta, lastTradeId: pos.id });
+    await batch.commit();
   }catch(err){ alert('Could not close position: ' + err.message); }
 }
 
@@ -1259,9 +1520,17 @@ function renderPremiumPreview(){
   }
 }
 
-// NOTE: Client-side Firestore writes are not a security boundary.
-// True anti-exploit enforcement requires server-side trade processing (e.g. Cloud Function/Admin SDK)
-// or rules that validate execution price against a trusted market-price document.
+// NOTE: Firestore rules now enforce (see firestore.rules):
+//  - a bare write to your own cash/realized field, with no matching position
+//    write in the same batch, is rejected outright
+//  - the position's declared cashDelta must exactly equal -(premium*qty) /
+//    -(avgCost*qty) at open, and the cash write must exactly match that delta
+//  - starting balance is fixed at signup (10000/0), not client-chosen
+//  - an open option/swap's premium/qty/symbol/type can't be edited after creation
+// STILL NOT covered without a trusted server: nothing here verifies that the
+// *premium itself* is a fair price for the option/swap (that needs the full
+// pricing formula run against report history, which rules can't execute) —
+// only that whatever premium you open at is what you actually pay and get paid on.
 function stockPositionId(symbol){
   return 'stock_' + encodeURIComponent(symbol).replace(/\./g,'%2E');
 }
@@ -1290,23 +1559,27 @@ async function buyStock(){
   const qty = parseInt(document.getElementById('assetQty').value,10);
   const msg = document.getElementById('assetMsg');
   msg.className='msg'; msg.textContent='';
-  const price = currentPrice(symbol);
-  if(!symbol || price==null){ msg.className='msg err'; msg.textContent='Pick a stock first.'; return; }
+  const rawPrice = currentPrice(symbol);
+  if(!symbol || rawPrice==null){ msg.className='msg err'; msg.textContent='Pick a stock first.'; return; }
   if(isNaN(qty) || qty<1){ msg.className='msg err'; msg.textContent='Enter a valid share quantity.'; return; }
-  const cost = Math.round(price*qty*100)/100;
+  const price = Math.round(rawPrice*100)/100; // round ONCE, here — matches what the rule re-derives cost from
+  const cost = price*qty;                     // no further rounding: must match price*qty bit-for-bit in the rule
   if(cost > state.cash){ msg.className='msg err'; msg.textContent='Not enough cash. Need ' + fmtMoney(cost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
   try{
     const ref = doc(db,'users',state.uid,'positions',stockPositionId(symbol));
+    const userRef = doc(db,'users',state.uid);
     const snap = await getDoc(ref);
     const existing = snap.exists() ? snap.data() : null;
+    const batch = writeBatch(db);
     if(existing && existing.type==='stock' && existing.status==='open'){
       const newQty = Number(existing.qty||0) + qty;
       const newAvg = ((Number(existing.qty||0)*Number(existing.avgCost||0)) + cost) / newQty;
-      await setDoc(ref, { type:'stock', symbol, qty:newQty, avgCost:Math.round(newAvg*100)/100, boughtDay:existing.boughtDay ?? state.day, status:'open', dismissed:false });
+      batch.set(ref, { type:'stock', symbol, qty:newQty, avgCost:Math.round(newAvg*100)/100, boughtDay:existing.boughtDay ?? state.day, status:'open', dismissed:false, cashDelta:-cost, realizedDelta:0 });
     } else {
-      await setDoc(ref, { type:'stock', symbol, qty, avgCost:price, boughtDay:state.day, status:'open', dismissed:false });
+      batch.set(ref, { type:'stock', symbol, qty, avgCost:price, boughtDay:state.day, status:'open', dismissed:false, cashDelta:-cost, realizedDelta:0 });
     }
-    await updateDoc(doc(db,'users',state.uid), { cash: state.cash - cost });
+    batch.update(userRef, { cash: state.cash - cost, realized: state.realized, lastTradeId: ref.id });
+    await batch.commit();
     renderAssets(); renderStats();
     msg.className='msg ok'; msg.textContent='Bought ' + qty + ' share' + (qty===1?'':'s') + ' of ' + symbol + ' at ' + fmtMoney(price) + '.';
   }catch(err){ msg.className='msg err'; msg.textContent='Stock purchase failed: ' + err.message; }
@@ -1324,13 +1597,16 @@ async function sellStock(symbol, sellQty){
   if(!confirm('Sell ' + sellQty + 'x ' + symbol + ' at ' + fmtMoney(price) + ' for ' + fmtMoney(proceeds) + '?')) return;
   try{
     const ref = doc(db,'users',state.uid,'positions',pos.id);
+    const userRef = doc(db,'users',state.uid);
     const remaining = pos.qty - sellQty;
+    const batch = writeBatch(db);
     if(remaining > 0){
-      await updateDoc(ref, { qty: remaining, lastSellPrice: price, lastSellDay: state.day });
+      batch.update(ref, { qty: remaining, lastSellPrice: price, lastSellDay: state.day, cashDelta: proceeds, realizedDelta: pnl });
     } else {
-      await updateDoc(ref, { qty: 0, status:'sold', sellPrice: price, sellDay: state.day, payoff: proceeds, realizedPnl: pnl, dismissed:false });
+      batch.update(ref, { qty: 0, status:'sold', sellPrice: price, sellDay: state.day, payoff: proceeds, realizedPnl: pnl, dismissed:false, cashDelta: proceeds, realizedDelta: pnl });
     }
-    await updateDoc(doc(db,'users',state.uid), { cash: state.cash + proceeds, realized: state.realized + pnl });
+    batch.update(userRef, { cash: state.cash + proceeds, realized: state.realized + pnl, lastTradeId: pos.id });
+    await batch.commit();
     renderAssets(); renderStats();
   }catch(err){ alert('Could not sell stock: ' + err.message); }
 }
