@@ -319,7 +319,7 @@
             <input type="number" id="dbgJumpDay" min="0" step="1">
             <button class="debug-btn" id="dbgJumpBtn">Go</button>
           </div>
-          <div class="admin-note" style="margin-top:16px;">Valuation weights — changing these and hitting Recalculate rewrites every player's entire price history for <b>every connected trader</b> immediately, using this formula. Only visible/editable here, admin-only server-side too.</div>
+          <div class="admin-note" style="margin-top:16px;">Valuation weights — changing these and hitting Recalculate rewrites every player's entire price history for <b>every connected trader</b> immediately, using this formula. This only affects stock prices — Elo/MMR uses its own separate weights and is untouched by this panel. Each stat is scored against same-profession peers in that report when there are at least 2 of them, otherwise the whole field, and no single stat can swing more than ±2.5 std devs. Only visible/editable here, admin-only server-side too.</div>
           <div class="weight-row"><label>Damage</label><input type="number" step="0.01" id="wDamage" style="width:100%"><span></span></div>
           <div class="weight-row"><label>Healing</label><input type="number" step="0.01" id="wHealing" style="width:100%"><span></span></div>
           <div class="weight-row"><label>Kills</label><input type="number" step="0.01" id="wKills" style="width:100%"><span></span></div>
@@ -513,17 +513,45 @@ const state = {
   cash: 10000, realized: 0, positions: [],
   selectedSymbols: new Set(), tradeType: 'call', historyFilter: 'all', assetSymbol: '', tickerSearch: ''
 };
-// Fixed, non-tunable pricing model — every trader sees the same prices.
-// Each stat is scored as a z-score against the field in that report, then
-// blended into one composite that becomes the day's percentage return.
-const DEFAULT_PRICE_WEIGHTS = { damage: 0.40, healing: 0.25, kills: 0.20, assists: 0.15, deaths: 0.35 };
+// Admin-tunable pricing model — every trader sees the same prices. Each stat
+// is scored as a z-score, then blended into one composite that becomes the
+// day's percentage return. This is the STOCK MARKET's weight set only —
+// Elo/MMR has its own separate ELO_WEIGHTS below and is never affected by
+// changes here.
+// Rebalanced away from the old damage-heavy split. Reasoning, in case these
+// get tuned again later:
+//  - Rocket League's own point system (Steam/community-documented) values an
+//    assist at 50% of a goal and a save at 60% — i.e. support/defensive
+//    stats are deliberately kept close to the primary offensive stat, not a
+//    rounding error next to it. That's the model for healing/assists here.
+//  - Warcraft Logs never compares a healer's throughput to a DPS player's —
+//    it percentile-ranks "against everyone else of your spec" (see
+//    roleStatsLookup below). Same idea: don't let a medic's ~200k damage
+//    ceiling get z-scored against riflemen who exist to do damage.
+//  - Deaths dropped from the single heaviest weight (0.35) to on par with
+//    damage/healing, and every z-score is now clamped (Z_CLAMP) so one bad
+//    zerg wipe can't single-handedly tank a support player's whole day.
+const DEFAULT_PRICE_WEIGHTS = { damage: 0.30, healing: 0.30, kills: 0.15, assists: 0.20, deaths: 0.30 };
 let PRICE_WEIGHTS = { ...DEFAULT_PRICE_WEIGHTS };
 const RETURN_SCALE = 0.05, MAX_RETURN = 0.35;
-// Elo model — damage & healing help, deaths hurt, compared head-to-head
-// against everyone else in the same report (standard multiplayer Elo).
-const ELO_WEIGHTS = { damage: 0.5, healing: 0.3, deaths: 0.6 };
 const ELO_START = 1500, ELO_K = 32;
-let unsubReports = null, unsubPositions = null, unsubUserDoc = null, unsubWeights = null;
+// Elo/MMR is a completely separate ladder from the stock market — its own
+// weights, its own constant, never touched by the admin's price-weight panel
+// or the "Recalculate" button. Same underlying scoring machinery (role-
+// relative z-scores, clamped — see weightedComposite below) as the price
+// model, but tuning one never moves the other.
+const ELO_WEIGHTS = { damage: 0.30, healing: 0.30, kills: 0.15, assists: 0.20, deaths: 0.30 };
+// Below this many same-profession peers in a single report, that profession's
+// own mean/std is too noisy to trust (e.g. a lone medic in a 40-player field)
+// — fall back to scoring against the whole field for that stat instead. 2 is
+// the floor: a standard 8v8 fields 2 medics per side, so most reports clear
+// this and get a real medic-vs-medic baseline instead of the field-wide one.
+const MIN_ROLE_SAMPLE = 2;
+// Cap any single stat's z-score contribution before weighting. Keeps one
+// freak report (a chain-death zerg wipe, a lucky 10-kill spree) from
+// swamping everything else in the composite.
+const Z_CLAMP = 2.5;
+let unsubReports = null, unsubPositions = null, unsubUserDoc = null, unsubWeights = null, unsubDayCounter = null;
 let reportsRecheckTimer = null;
 let pendingUsername = null;
 
@@ -622,6 +650,7 @@ onAuthStateChanged(auth, async (user) => {
   subscribeToUserDoc(userRef);
   subscribeToPositions(user.uid);
   subscribeToPriceWeights();
+  subscribeToDayCounter();
 
   loadingScreen.classList.add('hidden');
   appRoot.classList.remove('hidden');
@@ -632,7 +661,28 @@ function teardownSubscriptions(){
   if(unsubUserDoc){ unsubUserDoc(); unsubUserDoc = null; }
   if(unsubPositions){ unsubPositions(); unsubPositions = null; }
   if(unsubWeights){ unsubWeights(); unsubWeights = null; }
+  if(unsubDayCounter){ unsubDayCounter(); unsubDayCounter = null; }
   if(reportsRecheckTimer){ clearInterval(reportsRecheckTimer); reportsRecheckTimer = null; }
+}
+// The "day" counter (settings doc counters/day) only used to get picked up
+// by other clients indirectly, whenever the next report happened to land —
+// so an admin's Advance Day / Jump to Day debug actions (which touch this
+// counter but write no report) went invisible to everyone else until the
+// next upload. This is a single small document, so listening to it directly
+// is effectively free (one read on load, one more only when it changes) and
+// makes those clock-only moves broadcast live like everything else already
+// does. Never moves state.day backward — report data (which is what prices
+// and Elo are actually computed from) always wins if it's further ahead.
+function subscribeToDayCounter(){
+  const ref = doc(db, 'counters', 'day');
+  unsubDayCounter = onSnapshot(ref, (snap) => {
+    const counterDay = snap.exists() ? (snap.data().value || 0) : 0;
+    if(counterDay > state.day){
+      state.day = counterDay;
+      checkAndSettlePositions();
+      renderAll();
+    }
+  });
 }
 
 function addUidBoxIfMissing(uid){
@@ -892,6 +942,56 @@ function statMeanStd(rows, key){
   return { mean, std: Math.sqrt(variance) || 1 };
 }
 function zscore(value, mean, std){ return std ? (value-mean)/std : 0; }
+function clampZ(z){ return Math.max(-Z_CLAMP, Math.min(Z_CLAMP, z)); }
+function normProf(p){ return String(p||'Unknown').trim().toLowerCase() || 'unknown'; }
+
+// Builds a per-profession {mean,std} lookup for one stat within a single
+// report, so a player's z-score reflects "compared to peers who do the same
+// job" instead of the whole mixed field. profOf(row) must return that row's
+// profession string. Falls back to the field-wide mean/std whenever a
+// profession has fewer than MIN_ROLE_SAMPLE representatives in this report —
+// with only a single one of a profession present there's no reliable baseline for it,
+// and field-wide is the safer default.
+function roleStatsLookup(rows, key, profOf){
+  const fieldWide = statMeanStd(rows, key);
+  const byProf = {};
+  rows.forEach(r => {
+    const prof = normProf(profOf(r));
+    (byProf[prof] = byProf[prof] || []).push(r);
+  });
+  const cache = {};
+  return (rawProf) => {
+    const prof = normProf(rawProf);
+    if(!cache[prof]){
+      const peers = byProf[prof] || [];
+      cache[prof] = peers.length >= MIN_ROLE_SAMPLE ? statMeanStd(peers, key) : fieldWide;
+    }
+    return cache[prof];
+  };
+}
+// Builds all five per-profession lookups for one report/day in one pass
+// (cheap — O(field size), done once per report, not once per row).
+function buildStatLookups(rows, profOf){
+  return {
+    damage:  roleStatsLookup(rows, 'damage',  profOf),
+    healing: roleStatsLookup(rows, 'healing', profOf),
+    kills:   roleStatsLookup(rows, 'kills',   profOf),
+    assists: roleStatsLookup(rows, 'assists', profOf),
+    deaths:  roleStatsLookup(rows, 'deaths',  profOf),
+  };
+}
+// Shared composite: how "good" one row's stat line was that report, relative
+// to role-appropriate peers, as a single weighted number. Used by both the
+// stock price model and Elo so they can never fall out of sync again.
+function weightedComposite(lookups, prof, s, weights){
+  const dmg = lookups.damage(prof), heal = lookups.healing(prof), kills = lookups.kills(prof),
+        assists = lookups.assists(prof), deaths = lookups.deaths(prof);
+  return weights.damage   * clampZ(zscore(s.damage,   dmg.mean,   dmg.std)) +
+         weights.healing  * clampZ(zscore(s.healing,  heal.mean,  heal.std)) +
+         weights.kills    * clampZ(zscore(s.kills,    kills.mean, kills.std)) +
+         weights.assists  * clampZ(zscore(s.assists,  assists.mean, assists.std)) -
+         weights.deaths   * clampZ(zscore(s.deaths,   deaths.mean, deaths.std));
+}
 
 function recomputeAllPrices(){
   const players = {};
@@ -911,18 +1011,11 @@ function recomputeAllPrices(){
   const lastPrice = {};
   Object.keys(dayGroups).map(Number).sort((a,b)=>a-b).forEach(day => {
     const rows = dayGroups[day];
-    const dmg = statMeanStd(rows,'damage'), heal = statMeanStd(rows,'healing'),
-          kills = statMeanStd(rows,'kills'), assists = statMeanStd(rows,'assists'),
-          deaths = statMeanStd(rows,'deaths');
+    const lookups = buildStatLookups(rows, r => r.stats.profession);
     rows.forEach(r => {
       const s = r.stats;
       // A lone stock with nothing to compare against that report doesn't move.
-      const composite = rows.length < 2 ? 0 :
-          PRICE_WEIGHTS.damage   * zscore(s.damage,   dmg.mean,   dmg.std) +
-          PRICE_WEIGHTS.healing  * zscore(s.healing,  heal.mean,  heal.std) +
-          PRICE_WEIGHTS.kills    * zscore(s.kills,    kills.mean, kills.std) +
-          PRICE_WEIGHTS.assists  * zscore(s.assists,  assists.mean, assists.std) -
-          PRICE_WEIGHTS.deaths   * zscore(s.deaths,   deaths.mean, deaths.std);
+      const composite = rows.length < 2 ? 0 : weightedComposite(lookups, s.profession, s, PRICE_WEIGHTS);
       const ret = Math.max(-MAX_RETURN, Math.min(MAX_RETURN, composite * RETURN_SCALE));
       const prev = lastPrice[r.name] != null ? lastPrice[r.name] : 100;
       const rounded = Math.round(Math.max(1, prev * (1+ret)) * 100) / 100;
@@ -933,12 +1026,14 @@ function recomputeAllPrices(){
   state.players = players;
 }
 
-// Multiplayer Elo: every player in a report is compared head-to-head against
-// every other player in that same report. "Winning" a head-to-head means a
-// higher composite of damage+healing-deaths (z-scored against that report's
-// field). Ratings start at 1500 and move by the standard Elo update, scaled
-// down by the number of opponents so a 40-player battle doesn't swing wildly
-// more than a 2-player one.
+// Multiplayer Elo/MMR: every player in a report is compared head-to-head
+// against every other player in that same report. "Winning" a head-to-head
+// means a higher composite score using ELO_WEIGHTS (its own weight set —
+// see the note by ELO_WEIGHTS above; not the same object as PRICE_WEIGHTS,
+// role-relative per profession, z-clamped — see weightedComposite). Ratings
+// start at 1500 and move by the standard Elo update, scaled down by the
+// number of opponents so a 40-player battle doesn't swing wildly more than
+// a 2-player one.
 function computeAllElo(){
   const ratings = {};
   const sortedReports = [...state.reports].sort((a,b)=>a.day-b.day);
@@ -949,13 +1044,10 @@ function computeAllElo(){
       ratings[r.name].profession = r.profession;
     });
     if(rows.length < 2) return;
-    const dmg = statMeanStd(rows,'damage'), heal = statMeanStd(rows,'healing'), deaths = statMeanStd(rows,'deaths');
+    const lookups = buildStatLookups(rows, r => r.profession);
     const composite = {};
     rows.forEach(r => {
-      composite[r.name] =
-        ELO_WEIGHTS.damage  * zscore(r.damage,  dmg.mean,  dmg.std) +
-        ELO_WEIGHTS.healing * zscore(r.healing, heal.mean, heal.std) -
-        ELO_WEIGHTS.deaths  * zscore(r.deaths,  deaths.mean, deaths.std);
+      composite[r.name] = weightedComposite(lookups, r.profession, r, ELO_WEIGHTS);
     });
     const n = rows.length;
     const deltas = {};
