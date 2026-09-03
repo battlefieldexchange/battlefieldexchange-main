@@ -98,9 +98,7 @@
   table.ticker td{padding:7px 8px; border-bottom:1px solid rgba(36,53,42,0.6); vertical-align:middle;}
   table.ticker tbody tr:hover{background:rgba(77,255,158,0.04);}
   .sym{font-family:var(--sans); font-weight:600; letter-spacing:0.4px;}
-  .fac-imperial{color:var(--blue);}
-  .fac-rebel{color:var(--red);}
-  .fac-other{color:var(--amber);}
+  .cls-pill{font-weight:600;}
   .price{font-weight:600;}
   .chg{font-size:11px;}
   .chg.up{color:var(--phosphor);}
@@ -161,6 +159,8 @@
   .debug-inline input{width:70px; background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:7px 8px; font-family:var(--mono); border-radius:2px;}
   .dismiss-btn{ font-family:var(--mono); font-size:10px; background:transparent; border:1px solid var(--line); color:var(--text-dim); padding:2px 7px; border-radius:2px; cursor:pointer; margin-left:8px; }
   .dismiss-btn:hover{border-color:var(--text); color:var(--text);}
+  .close-btn{ font-family:var(--mono); font-size:11px; background:transparent; border:1px solid var(--phosphor-dim); color:var(--phosphor); padding:4px 10px; border-radius:2px; cursor:pointer; }
+  .close-btn:hover{background:rgba(77,255,158,0.12);}
 
   .subnav{max-width:1280px; margin:0 auto; padding:14px 24px 0; display:flex; gap:8px; border-bottom:1px solid var(--line);}
   .subnav button{ font-family:var(--sans); font-size:15px; font-weight:600; background:transparent; border:none; color:var(--text-dim); padding:8px 4px 12px; cursor:pointer; border-bottom:2px solid transparent; margin-right:14px; }
@@ -184,6 +184,13 @@
   .history-stats .stat{font-size:13px;}
   .history-stats .stat .label{color:var(--text-dim); font-size:11px;}
   .history-stats .stat .value{font-size:20px;}
+
+  .elo-summary{display:flex; gap:24px; margin-bottom:16px; flex-wrap:wrap;}
+  .elo-summary .stat{font-size:13px;}
+  .elo-summary .stat .label{color:var(--text-dim); font-size:11px;}
+  .elo-summary .stat .value{font-size:18px;}
+  .elo-pos{color:var(--phosphor);}
+  .elo-neg{color:var(--red);}
 
   ::-webkit-scrollbar{width:8px; height:8px;}
   ::-webkit-scrollbar-track{background:var(--panel);}
@@ -231,6 +238,7 @@
 <nav class="subnav">
   <button id="navFloor" class="active">Trading Floor</button>
   <button id="navHistory">Position History</button>
+  <button id="navElo">Elo Distribution</button>
 </nav>
 
 <main>
@@ -273,37 +281,15 @@
       </section>
 
       <section class="panel">
-        <div class="panel-head">
-          <h2>Valuation Model</h2>
-          <span class="sub">what moves a stock's price — local to your view</span>
-        </div>
-        <div class="panel-body">
-          <div class="weight-row"><label>Damage</label><input type="range" id="wDamage" min="0" max="100" value="100"><div class="val" id="wDamageVal">100</div></div>
-          <div class="weight-row"><label>Healing</label><input type="range" id="wHealing" min="0" max="100" value="100"><div class="val" id="wHealingVal">100</div></div>
-          <div class="weight-row"><label>Kills</label><input type="range" id="wKills" min="0" max="100" value="0"><div class="val" id="wKillsVal">0</div></div>
-          <div class="weight-row"><label>Assists</label><input type="range" id="wAssists" min="0" max="100" value="0"><div class="val" id="wAssistsVal">0</div></div>
-          <div class="weight-row"><label>Deaths (drag)</label><input type="range" id="wDeaths" min="0" max="100" value="0"><div class="val" id="wDeathsVal">0</div></div>
-          <div class="weight-note">Price = 100 base + weighted share of that report's best Damage/Healing/etc (each stat scored against the top performer in the same report). These sliders live only in your browser — they don't change what other traders see, just how you're evaluating the same underlying data.</div>
-        </div>
-      </section>
-
-      <section class="panel">
         <div class="panel-head"><h2>Ticker</h2><span class="sub" id="tickerSub">no stocks listed yet</span></div>
         <div class="panel-body" style="padding:0;">
+          <div style="padding:10px 16px; font-size:11px; color:var(--text-dim); border-bottom:1px solid var(--line); line-height:1.5;">Price moves with battle performance relative to the rest of the field each report — damage, healing, kills &amp; assists push it up, deaths pull it down — and compounds day over day like a real stock. Same formula for every trader.</div>
           <div style="max-height:520px; overflow-y:auto;">
             <table class="ticker">
-              <thead><tr><th>Symbol</th><th>Faction / Class</th><th>Price</th><th>Chg</th><th>Trend</th><th></th></tr></thead>
-              <tbody id="tickerBody"><tr><td colspan="6" class="empty-state">Upload a battle report to list the first stocks.</td></tr></tbody>
+              <thead><tr><th>Symbol</th><th>Class</th><th>Price</th><th>Chg</th><th>Vol</th><th>Trend</th><th></th></tr></thead>
+              <tbody id="tickerBody"><tr><td colspan="7" class="empty-state">Upload a battle report to list the first stocks.</td></tr></tbody>
             </table>
           </div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head"><h2>Price History</h2><span class="sub">select symbols below to plot</span></div>
-        <div class="chart-wrap">
-          <div class="legend-pills" id="legendPills"></div>
-          <canvas id="priceChart" height="110"></canvas>
         </div>
       </section>
     </div>
@@ -323,7 +309,15 @@
           <div class="field"><label>Underlying stock</label><select id="optSymbol"><option value="">— select a stock —</option></select></div>
 
           <div id="fieldsCallPut">
-            <div class="field"><label>Strike price ($)</label><input type="number" id="optStrike" step="0.01"></div>
+            <div class="field">
+              <label>Strike price</label>
+              <select id="optStrikeSelect"><option value="">— select a stock first —</option></select>
+            </div>
+            <div class="field hidden" id="optStrikeCustomField">
+              <label>Custom strike ($)</label>
+              <input type="number" id="optStrikeCustom" step="0.01" min="0.01">
+            </div>
+            <input type="hidden" id="optStrike">
           </div>
           <div id="fieldsSwap" class="hidden">
             <div class="field"><label>Trigger: Deaths ≥</label><input type="number" id="swapThreshold" min="1" step="1" value="5"></div>
@@ -353,6 +347,14 @@
 
     </div>
   </div>
+
+  <section class="panel" style="margin-top:20px;">
+    <div class="panel-head"><h2>Price History</h2><span class="sub">select symbols below to plot</span></div>
+    <div class="chart-wrap">
+      <div class="legend-pills" id="legendPills"></div>
+      <canvas id="priceChart" height="110"></canvas>
+    </div>
+  </section>
   </div>
 
   <div id="viewHistory" class="hidden">
@@ -369,6 +371,24 @@
           <table class="history">
             <thead><tr><th>Type</th><th>Symbol</th><th>Strike/Trigger</th><th>Bought</th><th>Expiry</th><th>Settled</th><th>Contracts</th><th>Premium</th><th>Payoff</th><th>Net P&amp;L</th><th>Result</th></tr></thead>
             <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="viewElo" class="hidden">
+    <section class="panel">
+      <div class="panel-head"><h2>Elo Distribution</h2><span class="sub">damage, healing &amp; deaths, scored head-to-head across every battle report</span></div>
+      <div class="panel-body">
+        <div class="elo-summary" id="eloSummary"></div>
+        <div class="chart-wrap" style="padding:0 0 18px;">
+          <canvas id="eloChart" height="130"></canvas>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="history">
+            <thead><tr><th>Rank</th><th>Player</th><th>Class</th><th>Elo</th><th>Battles</th></tr></thead>
+            <tbody id="eloBody"></tbody>
           </table>
         </div>
       </div>
@@ -407,11 +427,19 @@ const db = getFirestore(app);
 
 const state = {
   uid: null, username: null, isAdmin: false,
-  reports: [], day: 0, players: {},
+  reports: [], day: 0, players: {}, elo: {},
   cash: 10000, realized: 0, positions: [],
   selectedSymbols: new Set(), tradeType: 'call', historyFilter: 'all'
 };
-const weights = { damage: 1.0, healing: 1.0, kills: 0, assists: 0, deaths: 0 };
+// Fixed, non-tunable pricing model — every trader sees the same prices.
+// Each stat is scored as a z-score against the field in that report, then
+// blended into one composite that becomes the day's percentage return.
+const PRICE_WEIGHTS = { damage: 0.40, healing: 0.25, kills: 0.20, assists: 0.15, deaths: 0.35 };
+const RETURN_SCALE = 0.05, MAX_RETURN = 0.35;
+// Elo model — damage & healing help, deaths hurt, compared head-to-head
+// against everyone else in the same report (standard multiplayer Elo).
+const ELO_WEIGHTS = { damage: 0.5, healing: 0.3, deaths: 0.6 };
+const ELO_START = 1500, ELO_K = 32;
 let unsubReports = null, unsubPositions = null, unsubUserDoc = null;
 let pendingUsername = null;
 
@@ -618,6 +646,7 @@ function subscribeToMarket(){
     state.reports = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     state.day = state.reports.reduce((max,r) => Math.max(max, r.day), 0);
     recomputeAllPrices();
+    state.elo = computeAllElo();
     checkAndSettlePositions();
     renderAll();
   });
@@ -638,6 +667,14 @@ function subscribeToPositions(uid){
   });
 }
 
+function statMeanStd(rows, key){
+  const vals = rows.map(r => (r.stats ? r.stats[key] : r[key]) || 0);
+  const mean = vals.reduce((a,b)=>a+b,0) / vals.length;
+  const variance = vals.reduce((a,b)=>a+Math.pow(b-mean,2),0) / vals.length;
+  return { mean, std: Math.sqrt(variance) || 1 };
+}
+function zscore(value, mean, std){ return std ? (value-mean)/std : 0; }
+
 function recomputeAllPrices(){
   const players = {};
   state.reports.forEach(rep => {
@@ -653,24 +690,70 @@ function recomputeAllPrices(){
     dayGroups[h.day] = dayGroups[h.day] || [];
     dayGroups[h.day].push({ name: p.name, stats: h });
   }));
+  const lastPrice = {};
   Object.keys(dayGroups).map(Number).sort((a,b)=>a-b).forEach(day => {
     const rows = dayGroups[day];
-    const maxOf = (key) => Math.max(1, ...rows.map(r => r.stats[key] || 0));
-    const maxDamage = maxOf('damage'), maxHealing = maxOf('healing'), maxKills = maxOf('kills'),
-          maxAssists = maxOf('assists'), maxDeaths = maxOf('deaths');
+    const dmg = statMeanStd(rows,'damage'), heal = statMeanStd(rows,'healing'),
+          kills = statMeanStd(rows,'kills'), assists = statMeanStd(rows,'assists'),
+          deaths = statMeanStd(rows,'deaths');
     rows.forEach(r => {
       const s = r.stats;
-      let price = 100;
-      price += (s.damage / maxDamage) * 4 * weights.damage;
-      price += (s.healing / maxHealing) * 4 * weights.healing;
-      price += (s.kills / maxKills) * 4 * weights.kills;
-      price += (s.assists / maxAssists) * 4 * weights.assists;
-      price -= (s.deaths / maxDeaths) * 4 * weights.deaths;
-      price = Math.max(1, price);
-      players[r.name].priceHistory.push({ day, price: Math.round(price*100)/100 });
+      // A lone stock with nothing to compare against that report doesn't move.
+      const composite = rows.length < 2 ? 0 :
+          PRICE_WEIGHTS.damage   * zscore(s.damage,   dmg.mean,   dmg.std) +
+          PRICE_WEIGHTS.healing  * zscore(s.healing,  heal.mean,  heal.std) +
+          PRICE_WEIGHTS.kills    * zscore(s.kills,    kills.mean, kills.std) +
+          PRICE_WEIGHTS.assists  * zscore(s.assists,  assists.mean, assists.std) -
+          PRICE_WEIGHTS.deaths   * zscore(s.deaths,   deaths.mean, deaths.std);
+      const ret = Math.max(-MAX_RETURN, Math.min(MAX_RETURN, composite * RETURN_SCALE));
+      const prev = lastPrice[r.name] != null ? lastPrice[r.name] : 100;
+      const rounded = Math.round(Math.max(1, prev * (1+ret)) * 100) / 100;
+      players[r.name].priceHistory.push({ day, price: rounded });
+      lastPrice[r.name] = rounded;
     });
   });
   state.players = players;
+}
+
+// Multiplayer Elo: every player in a report is compared head-to-head against
+// every other player in that same report. "Winning" a head-to-head means a
+// higher composite of damage+healing-deaths (z-scored against that report's
+// field). Ratings start at 1500 and move by the standard Elo update, scaled
+// down by the number of opponents so a 40-player battle doesn't swing wildly
+// more than a 2-player one.
+function computeAllElo(){
+  const ratings = {};
+  const sortedReports = [...state.reports].sort((a,b)=>a.day-b.day);
+  sortedReports.forEach(rep => {
+    const rows = rep.players;
+    rows.forEach(r => {
+      if(!ratings[r.name]) ratings[r.name] = { elo: ELO_START, battles: 0, profession: r.profession };
+      ratings[r.name].profession = r.profession;
+    });
+    if(rows.length < 2) return;
+    const dmg = statMeanStd(rows,'damage'), heal = statMeanStd(rows,'healing'), deaths = statMeanStd(rows,'deaths');
+    const composite = {};
+    rows.forEach(r => {
+      composite[r.name] =
+        ELO_WEIGHTS.damage  * zscore(r.damage,  dmg.mean,  dmg.std) +
+        ELO_WEIGHTS.healing * zscore(r.healing, heal.mean, heal.std) -
+        ELO_WEIGHTS.deaths  * zscore(r.deaths,  deaths.mean, deaths.std);
+    });
+    const n = rows.length;
+    const deltas = {};
+    rows.forEach(a => {
+      let actual = 0, expected = 0;
+      rows.forEach(b => {
+        if(a.name === b.name) return;
+        const cA = composite[a.name], cB = composite[b.name];
+        actual += cA > cB ? 1 : (cA < cB ? 0 : 0.5);
+        expected += 1 / (1 + Math.pow(10, (ratings[b.name].elo - ratings[a.name].elo) / 400));
+      });
+      deltas[a.name] = (ELO_K / (n-1)) * (actual - expected);
+    });
+    rows.forEach(r => { ratings[r.name].elo += deltas[r.name]; ratings[r.name].battles += 1; });
+  });
+  return ratings;
 }
 
 function currentPrice(symbol){
@@ -706,6 +789,48 @@ function computeOptionPremium(symbol, strike, daysToExpiry, isPut){
   const premium = Math.max(0.5, intrinsic + timeValue);
   return { price, intrinsic, timeValue, premium: Math.round(premium*100)/100 };
 }
+// Builds a strike chain around the current price the way a real options
+// screen does — a spread of evenly-stepped strikes, step size scaled to
+// the underlying's price level, centered on at-the-money.
+function generateStrikeChain(price){
+  if(!price) return [];
+  let step;
+  if(price < 20) step = 0.5;
+  else if(price < 100) step = 1;
+  else if(price < 300) step = 2.5;
+  else step = 5;
+  const atm = Math.round(price/step)*step;
+  const strikes = [];
+  for(let i=-6;i<=6;i++){
+    const s = Math.round((atm + i*step)*100)/100;
+    if(s > 0) strikes.push(s);
+  }
+  return strikes;
+}
+
+function updateStrikeChain(){
+  const symbol = document.getElementById('optSymbol').value;
+  const sel = document.getElementById('optStrikeSelect');
+  const customField = document.getElementById('optStrikeCustomField');
+  customField.classList.add('hidden');
+  const price = currentPrice(symbol);
+  if(!symbol || price === null){
+    sel.innerHTML = '<option value="">— select a stock first —</option>';
+    document.getElementById('optStrike').value = '';
+    return;
+  }
+  const isPut = state.tradeType === 'put';
+  const strikes = generateStrikeChain(price);
+  let closest = strikes[0], closestDiff = Infinity;
+  strikes.forEach(s => { const d = Math.abs(s-price); if(d < closestDiff){ closest = s; closestDiff = d; } });
+  sel.innerHTML = strikes.map(s => {
+    const label = s === closest ? ' (ATM)' : ((isPut ? s > price : s < price) ? ' (ITM)' : ' (OTM)');
+    return '<option value="' + s + '">$' + s.toFixed(2) + label + '</option>';
+  }).join('') + '<option value="custom">Custom…</option>';
+  sel.value = closest;
+  document.getElementById('optStrike').value = closest;
+}
+
 function estimateTriggerProbability(symbol, threshold){
   const p = state.players[symbol];
   if(!p || p.history.length < 2) return 0.2;
@@ -782,6 +907,7 @@ document.querySelectorAll('.type-tabs button').forEach(btn => {
       swap: "Elimination Swap (a fictional credit-default-swap analog): you're buying protection that pays a fixed notional the moment the player's Deaths in any single report hit your trigger, any time before expiry, not just at expiry. If it never triggers, it expires worthless."
     };
     document.getElementById('typeDesc').textContent = descs[state.tradeType];
+    if(state.tradeType !== 'swap') updateStrikeChain();
     renderPremiumPreview();
   });
 });
@@ -882,8 +1008,34 @@ async function dismissPosition(posId){
   await updateDoc(doc(db,'users',state.uid,'positions',posId), { dismissed: true });
 }
 
+async function closePositionEarly(posId){
+  const pos = state.positions.find(p => p.id === posId);
+  if(!pos || pos.status !== 'open') return;
+  if(!confirm('Close this position now and lock in its current value?')) return;
+  const price = currentPrice(pos.symbol) ?? 0;
+  let payoff;
+  if(pos.type === 'swap'){
+    const remaining = Math.max(1, pos.expiryDay - state.day);
+    payoff = computeSwapPremium(pos.symbol, pos.threshold, pos.notional, remaining).premium * pos.qty;
+  } else {
+    payoff = (pos.type==='put' ? Math.max(0,pos.strike-price) : Math.max(0,price-pos.strike)) * pos.qty;
+  }
+  payoff = Math.round(payoff*100)/100;
+  try{
+    await updateDoc(doc(db,'users',state.uid,'positions',pos.id), { status: payoff>0?'won':'lost', settlePrice: price, payoff, closedEarly: true });
+    const userRef = doc(db,'users',state.uid);
+    await updateDoc(userRef, { cash: state.cash + payoff, realized: state.realized + (payoff - pos.premium*pos.qty) });
+  }catch(err){ alert('Could not close position: ' + err.message); }
+}
+
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function factionClass(f){ const s=(f||'').toLowerCase(); if(s.includes('imperial')) return 'fac-imperial'; if(s.includes('rebel')) return 'fac-rebel'; return 'fac-other'; }
+const CLASS_PALETTE = ['#4dff9e','#5db8ff','#ffb84d','#ff5d5d','#c792ea','#7fd1ff','#ffe066','#8fd6a8'];
+function classColor(cls){
+  const s = String(cls||'Unknown');
+  let hash = 0;
+  for(let i=0;i<s.length;i++) hash = (hash*31 + s.charCodeAt(i)) >>> 0;
+  return CLASS_PALETTE[hash % CLASS_PALETTE.length];
+}
 function fmtMoney(n){ return '$' + Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
 let chart = null;
@@ -922,7 +1074,7 @@ function renderTicker(){
   document.getElementById('tickerSub').textContent = symbols.length ? (symbols.length + ' stocks listed — day ' + state.day) : 'no stocks listed yet';
 
   if(symbols.length===0){
-    body.innerHTML = '<tr><td colspan="6" class="empty-state">Upload a battle report to list the first stocks.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">Upload a battle report to list the first stocks.</td></tr>';
   } else {
     body.innerHTML = symbols.map(sym => {
       const p = state.players[sym];
@@ -932,11 +1084,13 @@ function renderTicker(){
       const chg = price-prev, chgPct = prev ? (chg/prev*100) : 0;
       const chgClass = chg>0?'up':chg<0?'down':'flat';
       const arrow = chg>0?'▲':chg<0?'▼':'—';
+      const vol = volatility(sym);
       return '<tr>'
         + '<td><div class="sym">' + escapeHtml(sym) + '</div></td>'
-        + '<td><span class="' + factionClass(p.faction) + '">' + escapeHtml(p.faction) + '</span> · ' + escapeHtml(p.profession) + '</td>'
+        + '<td><span class="cls-pill" style="color:' + classColor(p.profession) + '">' + escapeHtml(p.profession) + '</span></td>'
         + '<td class="price">' + fmtMoney(price) + '</td>'
         + '<td class="chg ' + chgClass + '">' + arrow + ' ' + (chg>=0?'+':'') + chg.toFixed(2) + ' (' + chgPct.toFixed(1) + '%)</td>'
+        + '<td style="color:var(--text-dim)">' + (vol*100).toFixed(0) + '%</td>'
         + '<td>' + sparkline(ph) + '</td>'
         + '<td><button class="buy-btn" data-symbol="' + escapeHtml(sym) + '">Trade</button></td>'
         + '</tr>';
@@ -1032,6 +1186,7 @@ function renderPositions(){
   const sorted = [...visible].sort((a,b) => (b.boughtDay - a.boughtDay));
   body.innerHTML = sorted.map(renderPositionCard).join('');
   body.querySelectorAll('[data-dismissid]').forEach(btn => btn.addEventListener('click', () => dismissPosition(btn.dataset.dismissid)));
+  body.querySelectorAll('[data-closeid]').forEach(btn => btn.addEventListener('click', () => closePositionEarly(btn.dataset.closeid)));
 }
 
 function renderPositionCard(pos){
@@ -1039,13 +1194,16 @@ function renderPositionCard(pos){
   const kindLabel = pos.type==='swap' ? 'Elimination Swap' : (pos.type==='put'?'Put':'Call');
   if(pos.status === 'open'){
     const daysLeft = pos.expiryDay - state.day;
-    let mainLine, markValue;
+    let mainLine, markValue, closeValue;
     if(pos.type === 'swap'){
       mainLine = 'Trigger: deaths >= ' + pos.threshold + ' · Notional ' + fmtMoney(pos.notional);
       markValue = 0;
+      const remaining = Math.max(1, pos.expiryDay - state.day);
+      closeValue = computeSwapPremium(pos.symbol, pos.threshold, pos.notional, remaining).premium * pos.qty;
     } else {
       markValue = pos.type==='put' ? Math.max(0,pos.strike-price)*pos.qty : Math.max(0,price-pos.strike)*pos.qty;
       mainLine = 'Strike ' + fmtMoney(pos.strike) + ' · Current ' + fmtMoney(price);
+      closeValue = markValue;
     }
     return '<div class="pos-card">'
       + '<div class="top"><span class="kind">' + kindLabel + '</span><span class="sym">' + escapeHtml(pos.symbol) + '</span><span class="tag open">OPEN · ' + (daysLeft<=0?'settles next tick':daysLeft+' day'+(daysLeft!==1?'s':'')+' left') + '</span></div>'
@@ -1053,12 +1211,14 @@ function renderPositionCard(pos){
       + '<div class="detail"><span>Contracts</span><b>' + pos.qty + '</b></div>'
       + '<div class="detail"><span>Premium paid</span><b>' + fmtMoney(pos.premium*pos.qty) + '</b></div>'
       + (pos.type!=='swap' ? ('<div class="detail"><span>Mark-to-market</span><b>' + fmtMoney(markValue) + '</b></div>') : '')
+      + '<div class="detail"><span>Close now for</span><b>' + fmtMoney(closeValue) + '</b></div>'
+      + '<div style="margin-top:8px; text-align:right;"><button class="close-btn" data-closeid="' + pos.id + '">Close position</button></div>'
       + '</div>';
   } else {
     const cls = pos.status==='won' ? 'settled-win' : 'settled-loss';
     const netPl = pos.payoff - (pos.premium*pos.qty);
     return '<div class="pos-card ' + cls + '">'
-      + '<div class="top"><span class="kind">' + kindLabel + '</span><span class="sym">' + escapeHtml(pos.symbol) + '</span><span class="tag ' + (pos.status==='won'?'win':'loss') + '">' + (pos.status==='won'?'SETTLED — WON':'SETTLED — LOST') + '<button class="dismiss-btn" data-dismissid="' + pos.id + '">Dismiss</button></span></div>'
+      + '<div class="top"><span class="kind">' + kindLabel + '</span><span class="sym">' + escapeHtml(pos.symbol) + '</span><span class="tag ' + (pos.status==='won'?'win':'loss') + '">' + (pos.status==='won'?'SETTLED — WON':'SETTLED — LOST') + (pos.closedEarly?' (CLOSED EARLY)':'') + '<button class="dismiss-btn" data-dismissid="' + pos.id + '">Dismiss</button></span></div>'
       + '<div class="detail"><span>Settled at</span><b>' + fmtMoney(pos.settlePrice||0) + '</b></div>'
       + '<div class="detail"><span>Payoff</span><b>' + fmtMoney(pos.payoff) + '</b></div>'
       + '<div class="detail"><span>Net P&amp;L</span><b style="color:' + (netPl>=0?'var(--phosphor)':'var(--red)') + '">' + (netPl>=0?'+':'') + fmtMoney(netPl) + '</b></div>'
@@ -1090,7 +1250,7 @@ function renderHistory(){
       + '<td>Day ' + pos.boughtDay + '</td><td>Day ' + pos.expiryDay + '</td><td>' + fmtMoney(pos.settlePrice||0) + '</td>'
       + '<td>' + pos.qty + '</td><td>' + fmtMoney(pos.premium*pos.qty) + '</td><td>' + fmtMoney(pos.payoff) + '</td>'
       + '<td class="' + (netPl>=0?'win-text':'loss-text') + '">' + (netPl>=0?'+':'') + fmtMoney(netPl) + '</td>'
-      + '<td class="' + (pos.status==='won'?'win-text':'loss-text') + '">' + (pos.status==='won'?'WON':'LOST') + '</td>'
+      + '<td class="' + (pos.status==='won'?'win-text':'loss-text') + '">' + (pos.status==='won'?'WON':'LOST') + (pos.closedEarly?' (early)':'') + '</td>'
       + '</tr>';
   }).join('');
 }
@@ -1110,7 +1270,60 @@ function renderStats(){
 }
 
 function renderAll(){
-  renderTicker(); renderPremiumPreview(); renderPositions(); renderHistory(); renderStats(); renderChart();
+  renderTicker(); renderPremiumPreview(); renderPositions(); renderHistory(); renderStats(); renderChart(); renderEloTab();
+}
+
+function renderEloTab(){
+  const summaryEl = document.getElementById('eloSummary');
+  const bodyEl = document.getElementById('eloBody');
+  if(!summaryEl || !bodyEl) return;
+  const entries = Object.keys(state.elo).map(name => Object.assign({ name }, state.elo[name]));
+  entries.sort((a,b) => b.elo - a.elo);
+  if(entries.length === 0){
+    summaryEl.innerHTML = '';
+    bodyEl.innerHTML = '<tr><td colspan="5" class="empty-state">No battles recorded yet.</td></tr>';
+    if(eloChart){ eloChart.destroy(); eloChart = null; }
+    return;
+  }
+  const avg = entries.reduce((s,e)=>s+e.elo,0)/entries.length;
+  summaryEl.innerHTML =
+    '<div class="stat"><div class="label">PLAYERS TRACKED</div><div class="value">' + entries.length + '</div></div>'
+    + '<div class="stat"><div class="label">HIGHEST</div><div class="value elo-pos">' + escapeHtml(entries[0].name) + ' · ' + Math.round(entries[0].elo) + '</div></div>'
+    + '<div class="stat"><div class="label">LOWEST</div><div class="value elo-neg">' + escapeHtml(entries[entries.length-1].name) + ' · ' + Math.round(entries[entries.length-1].elo) + '</div></div>'
+    + '<div class="stat"><div class="label">AVERAGE</div><div class="value">' + Math.round(avg) + '</div></div>';
+
+  bodyEl.innerHTML = entries.map((e,i) =>
+    '<tr><td>' + (i+1) + '</td><td class="sym">' + escapeHtml(e.name) + '</td>'
+    + '<td><span class="cls-pill" style="color:' + classColor(e.profession) + '">' + escapeHtml(e.profession||'Unknown') + '</span></td>'
+    + '<td class="' + (e.elo>=ELO_START?'elo-pos':'elo-neg') + '">' + Math.round(e.elo) + '</td>'
+    + '<td>' + e.battles + '</td></tr>'
+  ).join('');
+
+  renderEloChart(entries);
+}
+
+let eloChart = null;
+function renderEloChart(entries){
+  const canvas = document.getElementById('eloChart');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const sorted = [...entries].sort((a,b)=>b.elo-a.elo);
+  const labels = sorted.map(e=>e.name);
+  const data = sorted.map(e=>Math.round(e.elo));
+  const colors = data.map(v => v>=ELO_START ? '#4dff9e' : '#ff5d5d');
+  if(eloChart) eloChart.destroy();
+  eloChart = new Chart(ctx, {
+    type:'bar',
+    data:{ labels, datasets:[{ label:'Elo', data, backgroundColor: colors }] },
+    options:{
+      responsive:true,
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ ticks:{ color:'#7fa08c' }, grid:{ color:'#1b271f' } },
+        y:{ ticks:{ color:'#7fa08c' }, grid:{ color:'#1b271f' } }
+      }
+    }
+  });
 }
 
 const dropzone = document.getElementById('dropzone');
@@ -1121,27 +1334,37 @@ fileInput.addEventListener('change', e => { if(e.target.files[0]) handleUpload(e
 ['dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, e=>{e.preventDefault(); dropzone.classList.remove('drag');}));
 dropzone.addEventListener('drop', e => { if(e.dataTransfer.files[0]) handleUpload(e.dataTransfer.files[0]); });
 
-['wDamage','wHealing','wKills','wAssists','wDeaths'].forEach(id => {
-  const el = document.getElementById(id), valEl = document.getElementById(id+'Val');
-  el.addEventListener('input', () => {
-    valEl.textContent = el.value;
-    weights[id.slice(1).toLowerCase()] = el.value/100;
-    recomputeAllPrices(); checkAndSettlePositions(); renderAll();
-  });
+document.getElementById('optSymbol').addEventListener('change', () => { updateStrikeChain(); renderPremiumPreview(); });
+['optExpiry','optQty','swapThreshold','swapNotional'].forEach(id => document.getElementById(id).addEventListener('input', renderPremiumPreview));
+
+document.getElementById('optStrikeSelect').addEventListener('change', () => {
+  const sel = document.getElementById('optStrikeSelect');
+  const customField = document.getElementById('optStrikeCustomField');
+  if(sel.value === 'custom'){
+    customField.classList.remove('hidden');
+    document.getElementById('optStrike').value = document.getElementById('optStrikeCustom').value || '';
+  } else {
+    customField.classList.add('hidden');
+    document.getElementById('optStrike').value = sel.value;
+  }
+  renderPremiumPreview();
 });
-weights.damage = document.getElementById('wDamage').value/100;
-weights.healing = document.getElementById('wHealing').value/100;
-weights.kills = document.getElementById('wKills').value/100;
-weights.assists = document.getElementById('wAssists').value/100;
-weights.deaths = document.getElementById('wDeaths').value/100;
+document.getElementById('optStrikeCustom').addEventListener('input', () => {
+  document.getElementById('optStrike').value = document.getElementById('optStrikeCustom').value;
+  renderPremiumPreview();
+});
 
-document.getElementById('optSymbol').addEventListener('change', () => { document.getElementById('optStrike').value=''; renderPremiumPreview(); });
-['optStrike','optExpiry','optQty','swapThreshold','swapNotional'].forEach(id => document.getElementById(id).addEventListener('input', renderPremiumPreview));
-
-const navFloor = document.getElementById('navFloor'), navHistory = document.getElementById('navHistory');
-const viewFloor = document.getElementById('viewTradingFloor'), viewHistory = document.getElementById('viewHistory');
-navFloor.addEventListener('click', () => { navFloor.classList.add('active'); navHistory.classList.remove('active'); viewFloor.classList.remove('hidden'); viewHistory.classList.add('hidden'); });
-navHistory.addEventListener('click', () => { navHistory.classList.add('active'); navFloor.classList.remove('active'); viewHistory.classList.remove('hidden'); viewFloor.classList.add('hidden'); renderHistory(); });
+const navFloor = document.getElementById('navFloor'), navHistory = document.getElementById('navHistory'), navElo = document.getElementById('navElo');
+const viewFloor = document.getElementById('viewTradingFloor'), viewHistory = document.getElementById('viewHistory'), viewElo = document.getElementById('viewElo');
+function activateNav(activeNav, activeView){
+  [navFloor,navHistory,navElo].forEach(b=>b.classList.remove('active'));
+  [viewFloor,viewHistory,viewElo].forEach(v=>v.classList.add('hidden'));
+  activeNav.classList.add('active');
+  activeView.classList.remove('hidden');
+}
+navFloor.addEventListener('click', () => activateNav(navFloor, viewFloor));
+navHistory.addEventListener('click', () => { activateNav(navHistory, viewHistory); renderHistory(); });
+navElo.addEventListener('click', () => { activateNav(navElo, viewElo); renderEloTab(); });
 document.getElementById('historyFilters').querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
   state.historyFilter = btn.dataset.filter;
   document.getElementById('historyFilters').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
