@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Battlefield Exchange</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   :root{
     --bg: #0a0f0c;
@@ -195,6 +196,22 @@
   ::-webkit-scrollbar{width:8px; height:8px;}
   ::-webkit-scrollbar-track{background:var(--panel);}
   ::-webkit-scrollbar-thumb{background:var(--line); border-radius:4px;}
+
+  .image-converter{margin-top:14px;}
+  .image-dropzone{border:1px dashed var(--line);border-radius:3px;padding:18px;text-align:center;color:var(--text-dim);font-size:13px;cursor:pointer;transition:border-color .15s,color .15s;}
+  .image-dropzone:hover,.image-dropzone.drag{border-color:var(--phosphor-dim);color:var(--text);}
+  .image-dropzone input{display:none;}
+  .image-dropzone .big{font-family:var(--sans);font-size:16px;color:var(--text);margin-bottom:4px;}
+  .ocr-status{font-size:11px;color:var(--text-dim);margin-top:10px;min-height:16px;line-height:1.5;}
+  .ocr-status.ok{color:var(--phosphor);}
+  .ocr-status.err{color:var(--red);}
+  .ocr-progress{height:3px;background:var(--line);margin-top:7px;border-radius:2px;overflow:hidden;display:none;}
+  .ocr-progress > div{height:100%;width:0;background:var(--phosphor-dim);transition:width .15s;}
+  .ocr-actions{display:flex;gap:7px;margin-top:10px;}
+  .ocr-actions button{flex:1;font-family:var(--mono);font-size:11px;background:transparent;border:1px solid var(--line);color:var(--text-dim);padding:6px 9px;border-radius:2px;cursor:pointer;}
+  .ocr-actions button:hover{border-color:var(--phosphor-dim);color:var(--phosphor);}
+  .ocr-actions button:disabled{opacity:.45;cursor:not-allowed;}
+
 </style>
 </head>
 <body>
@@ -259,6 +276,26 @@
             <input type="file" id="fileInput" accept=".html,.htm" multiple>
           </div>
           <div class="report-log" id="reportLog"></div>
+
+          <section class="panel image-converter">
+            <div class="panel-head">
+              <h2>Image → Battle Report HTML</h2>
+              <span class="sub">OCR converts a battle-report screenshot into the standard report format</span>
+            </div>
+            <div class="panel-body">
+              <div class="image-dropzone" id="imageDropzone">
+                <div class="big">Drop a battle report image here</div>
+                <div>or click to browse — PNG, JPG, JPEG, WEBP and other browser-readable images</div>
+                <input type="file" id="imageInput" accept="image/*">
+              </div>
+              <div class="ocr-progress" id="ocrProgress"><div id="ocrProgressBar"></div></div>
+              <div class="ocr-status" id="ocrStatus"></div>
+              <div class="ocr-actions">
+                <button id="downloadConvertedHtml" disabled>Download converted .html</button>
+                <button id="uploadConvertedHtml" disabled>Upload converted report</button>
+              </div>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -1471,6 +1508,339 @@ function renderEloChart(entries){
     }
   });
 }
+
+
+/* ---------- Image -> standard BATTLEFIELD_OVER.html converter ---------- */
+
+const imageDropzone = document.getElementById('imageDropzone');
+const imageInput = document.getElementById('imageInput');
+const ocrStatus = document.getElementById('ocrStatus');
+const ocrProgress = document.getElementById('ocrProgress');
+const ocrProgressBar = document.getElementById('ocrProgressBar');
+const downloadConvertedHtml = document.getElementById('downloadConvertedHtml');
+const uploadConvertedHtml = document.getElementById('uploadConvertedHtml');
+
+let convertedReportHtml = '';
+let convertedReportFile = null;
+
+function setOcrStatus(message, type=''){
+  ocrStatus.className = 'ocr-status' + (type ? ' ' + type : '');
+  ocrStatus.textContent = message;
+}
+
+function htmlEscape(value){
+  return String(value ?? '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+function cleanOcrNumber(value){
+  // OCR commonly turns commas into spaces and occasionally inserts punctuation.
+  const cleaned = String(value ?? '').replace(/[\s,]/g,'').replace(/[Oo]/g,'0').replace(/[Il]/g,'1');
+  const n = parseFloat(cleaned.replace(/[^0-9.-]/g,''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function factionColor(faction){
+  return /imperial/i.test(faction) ? '#4169E1' :
+         /rebel/i.test(faction) ? '#D93311' : '#FFFFFF';
+}
+
+function buildStandardBattleReportHtml(players, title='BATTLEFIELD OVER'){
+  const headers = [
+    'Name','Profession','Faction','Kills','Assists','Deaths','Damage',
+    'Largest Performed Hit','Damage Taken','Healing','Largest Heal','Captures'
+  ];
+
+  const rows = players.map((p, index) => {
+    const bg = index % 2 === 0 ? '#FFFFFF' : '#CCCCCC';
+    const fc = factionColor(p.faction);
+    return `<tr>
+<td bgcolor="${bg}"><font color="${fc}">${htmlEscape(p.name)}</font></td>
+<td bgcolor="${bg}">${htmlEscape(p.profession)}</td>
+<td bgcolor="${bg}"><font color="${fc}">${htmlEscape(p.faction)}</font></td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.kills)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.assists)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.deaths)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.damage)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.largestHit)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.damageTaken)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.healing)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.largestHeal)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.captures)}</td>
+</tr>`;
+  }).join('\n');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<title>${htmlEscape(title)}</title>
+</head>
+<body><center>
+<table border="1">
+<tr>
+${headers.map(h => `<th>${h}</th>`).join('\n')}
+</tr>
+${rows}
+</table>
+</center></body>
+</html>`;
+}
+
+/*
+ * Tesseract TSV gives each recognized word its bounding box.
+ * We locate the header row, use its X positions as the table's column
+ * anchors, then group subsequent OCR words by their Y/line position.
+ */
+function parseBattleReportFromTsv(data){
+  const words = (data.words || [])
+    .filter(w => (w.text || '').trim() && (w.conf == null || w.conf >= 20))
+    .map(w => ({
+      text: w.text.trim(),
+      x: w.bbox.x0,
+      x2: w.bbox.x1,
+      y: w.bbox.y0,
+      y2: w.bbox.y1,
+      line: `${w.block_num}:${w.par_num}:${w.line_num}`
+    }));
+
+  if(!words.length) throw new Error('OCR did not find any readable text.');
+
+  const required = [
+    'name','profession','faction','kills','assists','deaths','damage',
+    'largest','performed','hit','damage','taken','healing','largest','heal','captures'
+  ];
+
+  // Find the line containing the most known header words.
+  const lineGroups = new Map();
+  for(const w of words){
+    if(!lineGroups.has(w.line)) lineGroups.set(w.line, []);
+    lineGroups.get(w.line).push(w);
+  }
+
+  let header = null;
+  let bestScore = 0;
+  for(const lineWords of lineGroups.values()){
+    const normalized = lineWords.map(w => w.text.toLowerCase().replace(/[^a-z]/g,''));
+    const score = normalized.filter(v =>
+      ['name','profession','faction','kills','assists','deaths','damage','largest','performed','hit','taken','healing','heal','captures'].includes(v)
+    ).length;
+    if(score > bestScore){
+      bestScore = score;
+      header = lineWords.sort((a,b)=>a.x-b.x);
+    }
+  }
+
+  if(!header || bestScore < 7){
+    throw new Error('Could not locate the battle-report table headers. Use a clear screenshot containing the full table.');
+  }
+
+  // Known header sequence; locate the first word of each column.
+  const headerNames = [
+    'name','profession','faction','kills','assists','deaths','damage',
+    'largest','damage','healing','largest','captures'
+  ];
+  const anchors = [];
+  let searchFrom = 0;
+
+  for(const target of headerNames){
+    let found = -1;
+    for(let i=searchFrom;i<header.length;i++){
+      const n = header[i].text.toLowerCase().replace(/[^a-z]/g,'');
+      if(n === target || (target === 'largest' && n.startsWith('largest'))){
+        found = i;
+        break;
+      }
+    }
+    if(found >= 0){
+      anchors.push(header[found].x);
+      searchFrom = found + 1;
+    } else {
+      anchors.push(null);
+    }
+  }
+
+  // The two "largest" columns and the second "damage" can be disambiguated
+  // by their position. Fill missing anchors from evenly spaced header centers.
+  const validAnchors = anchors.filter(x => x != null);
+  if(validAnchors.length < 7) throw new Error('Could not determine the report columns.');
+
+  // Build column boundaries from header anchor positions. Missing anchors
+  // are interpolated between neighboring known anchors.
+  for(let i=0;i<anchors.length;i++){
+    if(anchors[i] != null) continue;
+    let left = i-1;
+    while(left >= 0 && anchors[left] == null) left--;
+    let right = i+1;
+    while(right < anchors.length && anchors[right] == null) right++;
+    if(left >= 0 && right < anchors.length){
+      anchors[i] = anchors[left] + (anchors[right]-anchors[left]) * ((i-left)/(right-left));
+    }
+  }
+
+  // For the two ambiguous "damage" header positions, the sequential search
+  // above normally resolves them correctly. Ensure monotonicity.
+  for(let i=1;i<anchors.length;i++){
+    if(anchors[i] == null) anchors[i] = anchors[i-1] + 1;
+  }
+
+  const rows = [];
+  const sortedLines = [...lineGroups.values()]
+    .map(ws => ws.sort((a,b)=>a.x-b.x))
+    .filter(ws => ws[0].y > Math.max(...header.map(w=>w.y2)) - 5)
+    .sort((a,b)=>a[0].y-b[0].y);
+
+  // Ignore the header line and collect lines beneath it. A player row is
+  // usually one OCR line; wrapped names are merged when their Y is close.
+  const headerBottom = Math.max(...header.map(w=>w.y2));
+  const dataLines = sortedLines.filter(ws => ws[0].y > headerBottom - 3);
+
+  function columnForX(x){
+    let best = 0;
+    let bestDist = Infinity;
+    for(let i=0;i<anchors.length;i++){
+      const d = Math.abs(x - anchors[i]);
+      if(d < bestDist){ bestDist = d; best = i; }
+    }
+    return best;
+  }
+
+  for(const ws of dataLines){
+    const cells = Array.from({length:12},()=>[]);
+    for(const w of ws){
+      const ci = columnForX(w.x);
+      cells[ci].push(w.text);
+    }
+    const values = cells.map(c=>c.join(' ').trim());
+
+    // A valid player row needs a name and at least several populated cells.
+    if(!values[0] || values.filter(Boolean).length < 5) continue;
+
+    // Header fragments occasionally appear as another line; skip them.
+    if(/^name$/i.test(values[0]) || /^profession$/i.test(values[0])) continue;
+
+    rows.push({
+      name: values[0],
+      profession: values[1] || 'Unknown',
+      faction: values[2] || 'Unknown',
+      kills: cleanOcrNumber(values[3]),
+      assists: cleanOcrNumber(values[4]),
+      deaths: cleanOcrNumber(values[5]),
+      damage: cleanOcrNumber(values[6]),
+      largestHit: cleanOcrNumber(values[7]),
+      damageTaken: cleanOcrNumber(values[8]),
+      healing: cleanOcrNumber(values[9]),
+      largestHeal: cleanOcrNumber(values[10]),
+      captures: cleanOcrNumber(values[11])
+    });
+  }
+
+  if(!rows.length) throw new Error('OCR found the table headers but could not extract any player rows.');
+  return rows;
+}
+
+async function convertImageToBattleHtml(file){
+  if(!window.Tesseract) throw new Error('OCR engine could not be loaded. Check your internet connection and reload the page.');
+
+  ocrProgress.style.display = 'block';
+  ocrProgressBar.style.width = '0%';
+  setOcrStatus('Loading OCR engine…');
+
+  const worker = await Tesseract.createWorker('eng', 1, {
+    logger: m => {
+      if(typeof m.progress === 'number'){
+        ocrProgressBar.style.width = Math.round(m.progress * 100) + '%';
+      }
+      if(m.status) setOcrStatus('OCR: ' + m.status + (m.progress ? ` ${Math.round(m.progress*100)}%` : ''));
+    }
+  });
+
+  try{
+    const { data } = await worker.recognize(file);
+    setOcrStatus('Reading battle-report table…');
+
+    const players = parseBattleReportFromTsv(data);
+    convertedReportHtml = buildStandardBattleReportHtml(players, 'BATTLEFIELD OVER');
+    convertedReportFile = new File(
+      [convertedReportHtml],
+      (file.name.replace(/\.[^.]+$/,'') || 'BATTLEFIELD_OVER') + '.html',
+      { type:'text/html' }
+    );
+
+    downloadConvertedHtml.disabled = false;
+    uploadConvertedHtml.disabled = false;
+    setOcrStatus(`Converted ${players.length} player${players.length===1?'':'s'} to standard BATTLEFIELD_OVER.html format.`, 'ok');
+    return convertedReportFile;
+  } finally {
+    await worker.terminate();
+    ocrProgress.style.display = 'none';
+  }
+}
+
+async function handleImageFile(file){
+  if(!file || !file.type.startsWith('image/')){
+    setOcrStatus('Please select an image file.', 'err');
+    return;
+  }
+  downloadConvertedHtml.disabled = true;
+  uploadConvertedHtml.disabled = true;
+  convertedReportHtml = '';
+  convertedReportFile = null;
+
+  try{
+    await convertImageToBattleHtml(file);
+  }catch(err){
+    setOcrStatus('Conversion failed: ' + (err.message || err), 'err');
+  }
+}
+
+imageDropzone.addEventListener('click', () => imageInput.click());
+imageInput.addEventListener('change', async e => {
+  await handleImageFile(e.target.files[0]);
+  imageInput.value = '';
+});
+
+['dragover','dragenter'].forEach(evt =>
+  imageDropzone.addEventListener(evt, e => {
+    e.preventDefault();
+    imageDropzone.classList.add('drag');
+  })
+);
+['dragleave','drop'].forEach(evt =>
+  imageDropzone.addEventListener(evt, e => {
+    e.preventDefault();
+    imageDropzone.classList.remove('drag');
+  })
+);
+imageDropzone.addEventListener('drop', async e => {
+  const file = e.dataTransfer.files[0];
+  await handleImageFile(file);
+});
+
+downloadConvertedHtml.addEventListener('click', () => {
+  if(!convertedReportHtml) return;
+  const blob = new Blob([convertedReportHtml], {type:'text/html'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = convertedReportFile?.name || 'BATTLEFIELD_OVER.html';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+uploadConvertedHtml.addEventListener('click', async () => {
+  if(!convertedReportFile) return;
+  uploadConvertedHtml.disabled = true;
+  setOcrStatus('Uploading converted report to the shared market…');
+  await handleUpload(convertedReportFile);
+  uploadConvertedHtml.disabled = false;
+  setOcrStatus('Converted report uploaded to the shared market.', 'ok');
+});
+
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
