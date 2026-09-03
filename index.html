@@ -237,7 +237,8 @@
 
 <nav class="subnav">
   <button id="navFloor" class="active">Trading Floor</button>
-  <button id="navHistory">Position History</button>
+  <button id="navAssets">Assets</button>
+  <button id="navHistory">Trade History</button>
   <button id="navElo">Elo Distribution</button>
 </nav>
 
@@ -253,9 +254,9 @@
         </div>
         <div class="panel-body">
           <div class="dropzone" id="dropzone">
-            <div class="big">Drop a battle report .html here</div>
-            <div>or click to browse — file is checked against the required format before it's accepted</div>
-            <input type="file" id="fileInput" accept=".html,.htm">
+            <div class="big">Drop one or more battle report .html files here</div>
+            <div>or click to browse — select one or more files; each file is checked before it's accepted</div>
+            <input type="file" id="fileInput" accept=".html,.htm" multiple>
           </div>
           <div class="report-log" id="reportLog"></div>
         </div>
@@ -341,7 +342,7 @@
       </section>
 
       <section class="panel">
-        <div class="panel-head"><h2>Positions</h2><span class="sub" id="posSub">0 open</span></div>
+        <div class="panel-head"><h2>Positions</h2><span class="sub" id="posSub">0 derivatives · 0 shares</span></div>
         <div class="panel-body" id="positionsBody"><div class="empty-state">No contracts yet.</div></div>
       </section>
 
@@ -357,9 +358,35 @@
   </section>
   </div>
 
+  <div id="viewAssets" class="hidden">
+    <section class="panel">
+      <div class="panel-head"><h2>Assets</h2><span class="sub">buy and sell player stock</span></div>
+      <div class="panel-body">
+        <div class="grid" style="grid-template-columns:1fr 1.4fr; gap:20px;">
+          <div>
+            <div class="type-desc" style="margin-bottom:12px;">Player stock is a cash equity position. Buy at the current market price, hold it through future reports, and sell whenever you choose. Your unrealized value uses the latest player price.</div>
+            <div class="field"><label>Player stock</label><select id="assetSymbol"><option value="">— select a stock —</option></select></div>
+            <div class="field"><label>Shares</label><input type="number" id="assetQty" min="1" step="1" value="1"></div>
+            <div class="premium-box" id="assetPreview">
+              <div class="line"><span>Current price</span><b id="assetCurrent">—</b></div>
+              <div class="line"><span>Shares</span><b id="assetShares">—</b></div>
+              <div class="line total"><span>Total cost</span><b id="assetTotal">—</b></div>
+            </div>
+            <button class="primary-btn" id="assetBuyBtn" disabled>Select a stock first</button>
+            <div class="msg" id="assetMsg"></div>
+          </div>
+          <div>
+            <div class="panel-head" style="margin:-14px -16px 14px;"><h2>Your Holdings</h2><span class="sub" id="assetSub">0 shares</span></div>
+            <div id="assetsBody"><div class="empty-state">No stock holdings yet.</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
   <div id="viewHistory" class="hidden">
     <section class="panel">
-      <div class="panel-head"><h2>Position History</h2><span class="sub">every contract you've settled, dismissed or not</span></div>
+      <div class="panel-head"><h2>Trade History</h2><span class="sub">every derivative trade you've settled or closed</span></div>
       <div class="panel-body">
         <div class="history-stats" id="historyStats"></div>
         <div class="filter-pills" id="historyFilters">
@@ -429,7 +456,7 @@ const state = {
   uid: null, username: null, isAdmin: false,
   reports: [], day: 0, players: {}, elo: {},
   cash: 10000, realized: 0, positions: [],
-  selectedSymbols: new Set(), tradeType: 'call', historyFilter: 'all'
+  selectedSymbols: new Set(), tradeType: 'call', historyFilter: 'all', assetSymbol: ''
 };
 // Fixed, non-tunable pricing model — every trader sees the same prices.
 // Each stat is scored as a z-score against the field in that report, then
@@ -986,7 +1013,7 @@ async function applySettlement(pos, settlePrice, payoff){
 
 async function checkAndSettlePositions(){
   for(const pos of state.positions){
-    if(pos.status !== 'open') continue;
+    if(pos.status !== 'open' || pos.type === 'stock') continue;
     if(pos.type === 'swap'){
       const relevantReports = state.reports
         .filter(r => r.day > pos.boughtDay && r.day <= pos.expiryDay)
@@ -1010,7 +1037,7 @@ async function dismissPosition(posId){
 
 async function closePositionEarly(posId){
   const pos = state.positions.find(p => p.id === posId);
-  if(!pos || pos.status !== 'open') return;
+  if(!pos || pos.status !== 'open' || pos.type==='stock') return;
   if(!confirm('Close this position now and lock in its current value?')) return;
   const price = currentPrice(pos.symbol) ?? 0;
   let payoff;
@@ -1092,12 +1119,18 @@ function renderTicker(){
         + '<td class="chg ' + chgClass + '">' + arrow + ' ' + (chg>=0?'+':'') + chg.toFixed(2) + ' (' + chgPct.toFixed(1) + '%)</td>'
         + '<td style="color:var(--text-dim)">' + (vol*100).toFixed(0) + '%</td>'
         + '<td>' + sparkline(ph) + '</td>'
-        + '<td><button class="buy-btn" data-symbol="' + escapeHtml(sym) + '">Trade</button></td>'
+        + '<td><button class="buy-btn" data-symbol="' + escapeHtml(sym) + '">Options</button> <button class="buy-btn" data-asset-symbol="' + escapeHtml(sym) + '">Buy Stock</button></td>'
         + '</tr>';
     }).join('');
-    body.querySelectorAll('.buy-btn').forEach(btn => btn.addEventListener('click', () => {
+    body.querySelectorAll('button[data-symbol]').forEach(btn => btn.addEventListener('click', () => {
       document.getElementById('optSymbol').value = btn.dataset.symbol;
       document.getElementById('optSymbol').dispatchEvent(new Event('change'));
+    }));
+    body.querySelectorAll('button[data-asset-symbol]').forEach(btn => btn.addEventListener('click', () => {
+      setAssetSymbol(btn.dataset.assetSymbol);
+      activateNav(navAssets, viewAssets);
+      renderAssets();
+      document.getElementById('assetSymbol').focus();
     }));
   }
 
@@ -1110,10 +1143,13 @@ function renderTicker(){
   pills.innerHTML = symbols.slice(0,30).map(s=>'<button data-symbol="' + escapeHtml(s) + '" class="' + (state.selectedSymbols.has(s)?'active':'') + '">' + escapeHtml(s) + '</button>').join('');
   pills.querySelectorAll('button').forEach(btn => {
     btn.style.background = state.selectedSymbols.has(btn.dataset.symbol) ? 'var(--phosphor-dim)' : '';
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
       if(state.selectedSymbols.has(btn.dataset.symbol)) state.selectedSymbols.delete(btn.dataset.symbol);
       else state.selectedSymbols.add(btn.dataset.symbol);
-      renderTicker(); renderChart();
+      btn.classList.toggle('active', state.selectedSymbols.has(btn.dataset.symbol));
+      btn.style.background = state.selectedSymbols.has(btn.dataset.symbol) ? 'var(--phosphor-dim)' : '';
+      renderChart();
     });
   });
 
@@ -1177,12 +1213,116 @@ function renderPremiumPreview(){
   }
 }
 
+function stockPositionId(symbol){
+  return 'stock_' + encodeURIComponent(symbol).replace(/\./g,'%2E');
+}
+function getStockPositions(){
+  return state.positions.filter(p => p.type==='stock' && p.status==='open' && p.qty>0);
+}
+function setAssetSymbol(symbol){
+  state.assetSymbol = symbol || '';
+  const sel = document.getElementById('assetSymbol');
+  if(sel) sel.value = state.assetSymbol;
+  renderAssetPreview();
+}
+function renderAssetPreview(){
+  const symbol = document.getElementById('assetSymbol')?.value || state.assetSymbol || '';
+  const qty = parseInt(document.getElementById('assetQty')?.value,10) || 1;
+  const price = currentPrice(symbol);
+  document.getElementById('assetCurrent').textContent = price==null ? '—' : fmtMoney(price);
+  document.getElementById('assetShares').textContent = symbol ? String(qty) : '—';
+  document.getElementById('assetTotal').textContent = price==null ? '—' : fmtMoney(price*qty);
+  const btn = document.getElementById('assetBuyBtn');
+  btn.disabled = price==null || qty<1;
+  btn.textContent = symbol && price!=null ? 'Buy ' + qty + 'x ' + symbol : 'Select a stock first';
+}
+async function buyStock(){
+  const symbol = document.getElementById('assetSymbol').value;
+  const qty = parseInt(document.getElementById('assetQty').value,10);
+  const msg = document.getElementById('assetMsg');
+  msg.className='msg'; msg.textContent='';
+  const price = currentPrice(symbol);
+  if(!symbol || price==null){ msg.className='msg err'; msg.textContent='Pick a stock first.'; return; }
+  if(isNaN(qty) || qty<1){ msg.className='msg err'; msg.textContent='Enter a valid share quantity.'; return; }
+  const cost = Math.round(price*qty*100)/100;
+  if(cost > state.cash){ msg.className='msg err'; msg.textContent='Not enough cash. Need ' + fmtMoney(cost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
+  try{
+    const ref = doc(db,'users',state.uid,'positions',stockPositionId(symbol));
+    const snap = await getDoc(ref);
+    const existing = snap.exists() ? snap.data() : null;
+    if(existing && existing.type==='stock' && existing.status==='open'){
+      const newQty = Number(existing.qty||0) + qty;
+      const newAvg = ((Number(existing.qty||0)*Number(existing.avgCost||0)) + cost) / newQty;
+      await setDoc(ref, { type:'stock', symbol, qty:newQty, avgCost:Math.round(newAvg*100)/100, boughtDay:existing.boughtDay ?? state.day, status:'open', dismissed:false });
+    } else {
+      await setDoc(ref, { type:'stock', symbol, qty, avgCost:price, boughtDay:state.day, status:'open', dismissed:false });
+    }
+    await updateDoc(doc(db,'users',state.uid), { cash: state.cash - cost });
+    msg.className='msg ok'; msg.textContent='Bought ' + qty + ' share' + (qty===1?'':'s') + ' of ' + symbol + ' at ' + fmtMoney(price) + '.';
+  }catch(err){ msg.className='msg err'; msg.textContent='Stock purchase failed: ' + err.message; }
+}
+async function sellStock(symbol, sellQty){
+  const pos = state.positions.find(p => p.type==='stock' && p.status==='open' && p.symbol===symbol);
+  if(!pos) return;
+  sellQty = Math.floor(Number(sellQty));
+  if(!sellQty || sellQty<1) return;
+  if(sellQty > pos.qty) { alert('You only own ' + pos.qty + ' share' + (pos.qty===1?'':'s') + ' of ' + symbol + '.'); return; }
+  const price = currentPrice(symbol);
+  if(price==null) return;
+  const proceeds = Math.round(price*sellQty*100)/100;
+  const pnl = Math.round((price - Number(pos.avgCost||0))*sellQty*100)/100;
+  if(!confirm('Sell ' + sellQty + 'x ' + symbol + ' at ' + fmtMoney(price) + ' for ' + fmtMoney(proceeds) + '?')) return;
+  try{
+    const ref = doc(db,'users',state.uid,'positions',pos.id);
+    const remaining = pos.qty - sellQty;
+    if(remaining > 0){
+      await updateDoc(ref, { qty: remaining, lastSellPrice: price, lastSellDay: state.day });
+    } else {
+      await updateDoc(ref, { qty: 0, status:'sold', sellPrice: price, sellDay: state.day, payoff: proceeds, realizedPnl: pnl, dismissed:false });
+    }
+    await updateDoc(doc(db,'users',state.uid), { cash: state.cash + proceeds, realized: state.realized + pnl });
+  }catch(err){ alert('Could not sell stock: ' + err.message); }
+}
+function renderAssets(){
+  const sel = document.getElementById('assetSymbol');
+  if(!sel) return;
+  const symbols = Object.keys(state.players).sort();
+  const prev = state.assetSymbol || sel.value;
+  sel.innerHTML = '<option value="">— select a stock —</option>' + symbols.map(s=>'<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+' — '+fmtMoney(currentPrice(s))+'</option>').join('');
+  if(symbols.includes(prev)){ sel.value=prev; state.assetSymbol=prev; }
+  else { sel.value=''; state.assetSymbol=''; }
+  renderAssetPreview();
+  const body = document.getElementById('assetsBody');
+  const holdings = getStockPositions().sort((a,b)=>a.symbol.localeCompare(b.symbol));
+  const totalShares = holdings.reduce((s,p)=>s+p.qty,0);
+  document.getElementById('assetSub').textContent = totalShares + ' share' + (totalShares===1?'':'s');
+  if(!holdings.length){ body.innerHTML='<div class="empty-state">No stock holdings yet.</div>'; return; }
+  body.innerHTML = holdings.map(pos => {
+    const price=currentPrice(pos.symbol)||0, value=price*pos.qty, cost=Number(pos.avgCost||0)*pos.qty, pnl=value-cost, pnlPct=cost?((pnl/cost)*100):0;
+    return '<div class="pos-card">'
+      + '<div class="top"><span class="kind">STOCK</span><span class="sym">'+escapeHtml(pos.symbol)+'</span><span class="tag open">OWNED · '+pos.qty+'</span></div>'
+      + '<div class="detail"><span>Market price</span><b>'+fmtMoney(price)+'</b></div>'
+      + '<div class="detail"><span>Average cost</span><b>'+fmtMoney(pos.avgCost)+'</b></div>'
+      + '<div class="detail"><span>Market value</span><b>'+fmtMoney(value)+'</b></div>'
+      + '<div class="detail"><span>Unrealized P&amp;L</span><b style="color:'+(pnl>=0?'var(--phosphor)':'var(--red)')+'">'+(pnl>=0?'+':'')+fmtMoney(pnl)+' ('+(pnlPct>=0?'+':'')+pnlPct.toFixed(1)+'%)</b></div>'
+      + '<div style="margin-top:8px; display:flex; gap:6px; align-items:center; justify-content:flex-end;">'
+      + '<input type="number" min="1" max="'+pos.qty+'" step="1" value="'+pos.qty+'" data-sellqty="'+escapeHtml(pos.symbol)+'" style="width:82px; background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:4px 6px; font-family:var(--mono);">'
+      + '<button class="close-btn" data-sellid="'+escapeHtml(pos.symbol)+'">Sell</button></div>'
+      + '</div>';
+  }).join('');
+  body.querySelectorAll('[data-sellid]').forEach(btn => btn.addEventListener('click', () => {
+    const input = Array.from(body.querySelectorAll('[data-sellqty]')).find(el => el.dataset.sellqty===btn.dataset.sellid);
+    sellStock(btn.dataset.sellid, input ? input.value : 1);
+  }));
+}
+
 function renderPositions(){
   const body = document.getElementById('positionsBody');
-  const visible = state.positions.filter(p => p.status==='open' || !p.dismissed);
-  const open = state.positions.filter(p=>p.status==='open');
-  document.getElementById('posSub').textContent = open.length + ' open';
-  if(visible.length===0){ body.innerHTML = '<div class="empty-state">No contracts yet.</div>'; return; }
+  const visible = state.positions.filter(p => p.type!=='stock' && (p.status==='open' || !p.dismissed));
+  const open = state.positions.filter(p=>p.type!=='stock' && p.status==='open');
+  const shares = getStockPositions().reduce((sum,p)=>sum+Number(p.qty||0),0);
+  document.getElementById('posSub').textContent = open.length + ' derivative' + (open.length===1?'':'s') + ' · ' + shares + ' share' + (shares===1?'':'s');
+  if(visible.length===0){ body.innerHTML = '<div class="empty-state">No derivative contracts yet. Stock holdings live under Assets.</div>'; return; }
   const sorted = [...visible].sort((a,b) => (b.boughtDay - a.boughtDay));
   body.innerHTML = sorted.map(renderPositionCard).join('');
   body.querySelectorAll('[data-dismissid]').forEach(btn => btn.addEventListener('click', () => dismissPosition(btn.dataset.dismissid)));
@@ -1227,7 +1367,7 @@ function renderPositionCard(pos){
 }
 
 function renderHistory(){
-  const settled = state.positions.filter(p=>p.status!=='open');
+  const settled = state.positions.filter(p=>p.type!=='stock' && p.status!=='open');
   const filtered = settled.filter(p => state.historyFilter==='all' ? true : (state.historyFilter==='won'?p.status==='won':p.status==='lost'));
   const sorted = [...filtered].sort((a,b) => b.expiryDay - a.expiryDay);
   const wins = settled.filter(p=>p.status==='won').length, losses = settled.filter(p=>p.status==='lost').length;
@@ -1258,6 +1398,7 @@ function renderHistory(){
 function renderStats(){
   document.getElementById('statCash').textContent = fmtMoney(state.cash);
   const openVal = state.positions.filter(p=>p.status==='open').reduce((sum,pos) => {
+    if(pos.type==='stock') return sum + (currentPrice(pos.symbol)||0) * pos.qty;
     if(pos.type==='swap') return sum;
     const price = currentPrice(pos.symbol) || 0;
     return sum + (pos.type==='put' ? Math.max(0,pos.strike-price) : Math.max(0,price-pos.strike)) * pos.qty;
@@ -1270,7 +1411,7 @@ function renderStats(){
 }
 
 function renderAll(){
-  renderTicker(); renderPremiumPreview(); renderPositions(); renderHistory(); renderStats(); renderChart(); renderEloTab();
+  renderTicker(); renderPremiumPreview(); renderPositions(); renderAssets(); renderHistory(); renderStats(); renderChart(); renderEloTab();
 }
 
 function renderEloTab(){
@@ -1329,10 +1470,15 @@ function renderEloChart(entries){
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
 dropzone.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', e => { if(e.target.files[0]) handleUpload(e.target.files[0]); fileInput.value=''; });
+async function handleUploadBatch(fileList){
+  const files = Array.from(fileList || []).filter(f => /\.html?$/i.test(f.name));
+  if(!files.length) return;
+  for(const file of files) await handleUpload(file);
+}
+fileInput.addEventListener('change', async e => { await handleUploadBatch(e.target.files); fileInput.value=''; });
 ['dragover','dragenter'].forEach(evt => dropzone.addEventListener(evt, e=>{e.preventDefault(); dropzone.classList.add('drag');}));
 ['dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, e=>{e.preventDefault(); dropzone.classList.remove('drag');}));
-dropzone.addEventListener('drop', e => { if(e.dataTransfer.files[0]) handleUpload(e.dataTransfer.files[0]); });
+dropzone.addEventListener('drop', async e => { await handleUploadBatch(e.dataTransfer.files); });
 
 document.getElementById('optSymbol').addEventListener('change', () => { updateStrikeChain(); renderPremiumPreview(); });
 ['optExpiry','optQty','swapThreshold','swapNotional'].forEach(id => document.getElementById(id).addEventListener('input', renderPremiumPreview));
@@ -1354,17 +1500,21 @@ document.getElementById('optStrikeCustom').addEventListener('input', () => {
   renderPremiumPreview();
 });
 
-const navFloor = document.getElementById('navFloor'), navHistory = document.getElementById('navHistory'), navElo = document.getElementById('navElo');
-const viewFloor = document.getElementById('viewTradingFloor'), viewHistory = document.getElementById('viewHistory'), viewElo = document.getElementById('viewElo');
+const navFloor = document.getElementById('navFloor'), navAssets = document.getElementById('navAssets'), navHistory = document.getElementById('navHistory'), navElo = document.getElementById('navElo');
+const viewFloor = document.getElementById('viewTradingFloor'), viewAssets = document.getElementById('viewAssets'), viewHistory = document.getElementById('viewHistory'), viewElo = document.getElementById('viewElo');
 function activateNav(activeNav, activeView){
-  [navFloor,navHistory,navElo].forEach(b=>b.classList.remove('active'));
-  [viewFloor,viewHistory,viewElo].forEach(v=>v.classList.add('hidden'));
+  [navFloor,navAssets,navHistory,navElo].forEach(b=>b.classList.remove('active'));
+  [viewFloor,viewAssets,viewHistory,viewElo].forEach(v=>v.classList.add('hidden'));
   activeNav.classList.add('active');
   activeView.classList.remove('hidden');
 }
 navFloor.addEventListener('click', () => activateNav(navFloor, viewFloor));
+navAssets.addEventListener('click', () => { activateNav(navAssets, viewAssets); renderAssets(); });
 navHistory.addEventListener('click', () => { activateNav(navHistory, viewHistory); renderHistory(); });
 navElo.addEventListener('click', () => { activateNav(navElo, viewElo); renderEloTab(); });
+document.getElementById('assetSymbol').addEventListener('change', e => { state.assetSymbol=e.target.value; renderAssetPreview(); });
+document.getElementById('assetQty').addEventListener('input', renderAssetPreview);
+document.getElementById('assetBuyBtn').addEventListener('click', buyStock);
 document.getElementById('historyFilters').querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
   state.historyFilter = btn.dataset.filter;
   document.getElementById('historyFilters').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
