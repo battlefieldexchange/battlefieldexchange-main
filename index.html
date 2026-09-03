@@ -322,6 +322,7 @@
         <div class="panel-head"><h2>Ticker</h2><span class="sub" id="tickerSub">no stocks listed yet</span></div>
         <div class="panel-body" style="padding:0;">
           <div style="padding:10px 16px; font-size:11px; color:var(--text-dim); border-bottom:1px solid var(--line); line-height:1.5;">Price moves with battle performance relative to the rest of the field each report — damage, healing, kills &amp; assists push it up, deaths pull it down — and compounds day over day like a real stock. Same formula for every trader.</div>
+          <div class="field" style="margin:0; padding:10px 16px; border-bottom:1px solid var(--line);"><input type="text" id="tickerSearch" placeholder="Search symbol or class…" autocomplete="off"></div>
           <div style="max-height:520px; overflow-y:auto;">
             <table class="ticker">
               <thead><tr><th>Symbol</th><th>Class</th><th>Price</th><th>Chg</th><th>Vol</th><th>Trend</th><th></th></tr></thead>
@@ -493,7 +494,7 @@ const state = {
   uid: null, username: null, isAdmin: false,
   reports: [], day: 0, players: {}, elo: {},
   cash: 10000, realized: 0, positions: [],
-  selectedSymbols: new Set(), tradeType: 'call', historyFilter: 'all', assetSymbol: ''
+  selectedSymbols: new Set(), tradeType: 'call', historyFilter: 'all', assetSymbol: '', tickerSearch: ''
 };
 // Fixed, non-tunable pricing model — every trader sees the same prices.
 // Each stat is scored as a z-score against the field in that report, then
@@ -1134,11 +1135,16 @@ function sparkline(priceHistory){
 
 function renderTicker(){
   const body = document.getElementById('tickerBody');
-  const symbols = Object.keys(state.players).sort((a,b)=>(currentPrice(b)||0)-(currentPrice(a)||0));
-  document.getElementById('tickerSub').textContent = symbols.length ? (symbols.length + ' stocks listed — day ' + state.day) : 'no stocks listed yet';
+  const allSymbols = Object.keys(state.players).sort((a,b)=>(currentPrice(b)||0)-(currentPrice(a)||0));
+  document.getElementById('tickerSub').textContent = allSymbols.length ? (allSymbols.length + ' stocks listed — day ' + state.day) : 'no stocks listed yet';
 
-  if(symbols.length===0){
+  const q = (state.tickerSearch || '').trim().toLowerCase();
+  const symbols = q ? allSymbols.filter(sym => sym.toLowerCase().includes(q) || (state.players[sym].profession||'').toLowerCase().includes(q)) : allSymbols;
+
+  if(allSymbols.length===0){
     body.innerHTML = '<tr><td colspan="7" class="empty-state">Upload a battle report to list the first stocks.</td></tr>';
+  } else if(symbols.length===0){
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">No symbols match “' + escapeHtml(state.tickerSearch) + '”.</td></tr>';
   } else {
     body.innerHTML = symbols.map(sym => {
       const p = state.players[sym];
@@ -1156,7 +1162,7 @@ function renderTicker(){
         + '<td class="chg ' + chgClass + '">' + arrow + ' ' + (chg>=0?'+':'') + chg.toFixed(2) + ' (' + chgPct.toFixed(1) + '%)</td>'
         + '<td style="color:var(--text-dim)">' + (vol*100).toFixed(0) + '%</td>'
         + '<td>' + sparkline(ph) + '</td>'
-        + '<td><button class="buy-btn" data-symbol="' + escapeHtml(sym) + '">Options</button> <button class="buy-btn" data-asset-symbol="' + escapeHtml(sym) + '">Buy Stock</button></td>'
+        + '<td><button type="button" class="buy-btn" data-symbol="' + escapeHtml(sym) + '">Options</button> <button type="button" class="buy-btn" data-asset-symbol="' + escapeHtml(sym) + '">Buy Stock</button></td>'
         + '</tr>';
     }).join('');
     body.querySelectorAll('button[data-symbol]').forEach(btn => btn.addEventListener('click', () => {
@@ -1173,20 +1179,23 @@ function renderTicker(){
 
   const sel = document.getElementById('optSymbol');
   const prevVal = sel.value;
-  sel.innerHTML = '<option value="">— select a stock —</option>' + symbols.map(s=>'<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + ' — ' + fmtMoney(currentPrice(s)) + '</option>').join('');
-  if(symbols.includes(prevVal)) sel.value = prevVal;
+  sel.innerHTML = '<option value="">— select a stock —</option>' + allSymbols.map(s=>'<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + ' — ' + fmtMoney(currentPrice(s)) + '</option>').join('');
+  if(allSymbols.includes(prevVal)) sel.value = prevVal;
 
   const pills = document.getElementById('legendPills');
-  pills.innerHTML = symbols.slice(0,30).map(s=>'<button data-symbol="' + escapeHtml(s) + '" class="' + (state.selectedSymbols.has(s)?'active':'') + '">' + escapeHtml(s) + '</button>').join('');
+  pills.innerHTML = allSymbols.slice(0,30).map(s=>'<button type="button" data-symbol="' + escapeHtml(s) + '" class="' + (state.selectedSymbols.has(s)?'active':'') + '">' + escapeHtml(s) + '</button>').join('');
   pills.querySelectorAll('button').forEach(btn => {
     btn.style.background = state.selectedSymbols.has(btn.dataset.symbol) ? 'var(--phosphor-dim)' : '';
     btn.addEventListener('click', (e) => {
       e.preventDefault();
+      const scrollY = window.scrollY;
       if(state.selectedSymbols.has(btn.dataset.symbol)) state.selectedSymbols.delete(btn.dataset.symbol);
       else state.selectedSymbols.add(btn.dataset.symbol);
       btn.classList.toggle('active', state.selectedSymbols.has(btn.dataset.symbol));
       btn.style.background = state.selectedSymbols.has(btn.dataset.symbol) ? 'var(--phosphor-dim)' : '';
       renderChart();
+      btn.blur();
+      window.scrollTo(0, scrollY);
     });
   });
 
@@ -1890,6 +1899,10 @@ navElo.addEventListener('click', () => { activateNav(navElo, viewElo); renderElo
 document.getElementById('assetSymbol').addEventListener('change', e => { state.assetSymbol=e.target.value; renderAssetPreview(); });
 document.getElementById('assetQty').addEventListener('input', renderAssetPreview);
 document.getElementById('assetBuyBtn').addEventListener('click', buyStock);
+document.getElementById('tickerSearch').addEventListener('input', e => {
+  state.tickerSearch = e.target.value;
+  renderTicker();
+});
 document.getElementById('historyFilters').querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
   state.historyFilter = btn.dataset.filter;
   document.getElementById('historyFilters').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
