@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Battlefield Exchange</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg: #0a0f0c;
+    --panel: #0f1712;
+    --panel-2: #131d17;
+    --line: #24352a;
+    --phosphor: #4dff9e;
+    --phosphor-dim: #2d8a5c;
+    --amber: #ffb84d;
+    --red: #ff5d5d;
+    --blue: #5db8ff;
+    --purple: #c792ea;
+    --text: #d7ecdf;
+    --text-dim: #7fa08c;
+    --mono: "IBM Plex Mono", "Courier New", monospace;
+    --sans: "Barlow Condensed", Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--mono);}
+  body{
+    background-image:
+      radial-gradient(ellipse at top, rgba(77,255,158,0.05), transparent 60%),
+      repeating-linear-gradient(180deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 3px);
+    min-height:100vh;
+    padding-bottom:60px;
+  }
+  ::selection{background:var(--phosphor-dim);color:#000;}
+  a{color:var(--phosphor);}
+  .hidden{display:none !important;}
+
+  .auth-wrap{ max-width:420px; margin:9vh auto 0; padding:0 20px; }
+  .auth-card{ background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:28px 26px; }
+  .auth-card h1{ font-family:var(--sans); color:var(--phosphor); font-size:28px; margin:0 0 4px; text-shadow:0 0 18px rgba(77,255,158,0.35); }
+  .auth-card .tagline{font-size:12px; color:var(--text-dim); margin-bottom:22px;}
+  .auth-tabs{display:flex; gap:6px; margin-bottom:18px;}
+  .auth-tabs button{ flex:1; font-family:var(--sans); font-weight:600; font-size:14px; background:var(--panel-2); border:1px solid var(--line); color:var(--text-dim); padding:8px; border-radius:2px; cursor:pointer; }
+  .auth-tabs button.active{color:var(--phosphor); border-color:var(--phosphor-dim);}
+  .auth-msg{font-size:12px; min-height:16px; margin-top:10px;}
+  .auth-msg.err{color:var(--red);}
+  .auth-msg.ok{color:var(--phosphor);}
+  .auth-loading{text-align:center; color:var(--text-dim); padding:60px 20px; font-size:13px;}
+
+  header.exchange-header{
+    border-bottom:1px solid var(--line); padding:22px 28px 18px; display:flex; justify-content:space-between;
+    align-items:flex-end; flex-wrap:wrap; gap:14px; background:linear-gradient(180deg, rgba(77,255,158,0.04), transparent);
+  }
+  .brand{display:flex;align-items:baseline;gap:14px;}
+  .brand h1{ font-family:var(--sans); font-weight:700; font-size:34px; letter-spacing:0.5px; margin:0; color:var(--phosphor); text-shadow:0 0 18px rgba(77,255,158,0.35); }
+  .brand .tick{ font-size:13px; color:var(--text-dim); border:1px solid var(--line); padding:3px 8px; border-radius:2px; }
+  .session-stats{display:flex;gap:22px;font-size:13px; align-items:flex-end;}
+  .session-stats .stat{text-align:right;}
+  .session-stats .stat .label{color:var(--text-dim);font-size:11px;}
+  .session-stats .stat .value{font-size:19px;color:var(--text);}
+  .session-stats .stat .value.up{color:var(--phosphor);}
+  .session-stats .stat .value.down{color:var(--red);}
+  .who{font-size:12px; color:var(--text-dim); text-align:right;}
+  .who b{color:var(--text);}
+  .who .admin-pill{color:var(--amber); border:1px solid var(--amber); border-radius:10px; padding:1px 7px; font-size:10px; margin-left:6px;}
+  .logout-btn{ font-family:var(--mono); font-size:11px; background:transparent; border:1px solid var(--line); color:var(--text-dim); padding:3px 9px; border-radius:2px; cursor:pointer; margin-top:4px; }
+  .logout-btn:hover{border-color:var(--red); color:var(--red);}
+
+  main{max-width:1280px;margin:0 auto;padding:22px 24px;}
+  .grid{display:grid;grid-template-columns:1.6fr 1fr;gap:20px;}
+  @media (max-width: 980px){ .grid{grid-template-columns:1fr;} }
+
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:3px;}
+  .panel-head{ padding:12px 16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+  .panel-head h2{font-family:var(--sans); font-size:18px; font-weight:600; margin:0; color:var(--text); letter-spacing:0.3px;}
+  .panel-head .sub{font-size:11px;color:var(--text-dim);}
+  .panel-body{padding:14px 16px;}
+
+  .dropzone{ border:1px dashed var(--line); border-radius:3px; padding:22px; text-align:center; color:var(--text-dim); font-size:13px; cursor:pointer; transition:border-color .15s, color .15s; }
+  .dropzone:hover, .dropzone.drag{border-color:var(--phosphor-dim); color:var(--text);}
+  .dropzone input{display:none;}
+  .dropzone .big{font-family:var(--sans); font-size:16px; color:var(--text); margin-bottom:4px;}
+
+  .report-log{margin-top:12px; font-size:12px; max-height:160px; overflow-y:auto;}
+  .report-log .row{display:flex; justify-content:space-between; gap:10px; padding:5px 0; border-bottom:1px solid var(--line); color:var(--text-dim);}
+  .report-log .row span:first-child{color:var(--text); flex-shrink:0;}
+  .report-log .row .del-report{ font-family:var(--mono); font-size:10px; background:transparent; border:1px solid var(--red); color:var(--red); padding:1px 7px; border-radius:2px; cursor:pointer; }
+  .report-log .row .del-report:hover{background:rgba(255,93,93,0.12);}
+
+  .weight-row{display:grid; grid-template-columns:110px 1fr 42px; align-items:center; gap:10px; margin-bottom:10px; font-size:12px;}
+  .weight-row label{color:var(--text-dim);}
+  .weight-row input[type=range]{accent-color:var(--phosphor-dim); width:100%;}
+  .weight-row .val{text-align:right; color:var(--phosphor);}
+  .weight-note{font-size:11px; color:var(--text-dim); margin-top:6px; line-height:1.5;}
+
+  table.ticker{width:100%; border-collapse:collapse; font-size:13px;}
+  table.ticker thead th{ text-align:left; font-family:var(--sans); font-weight:600; font-size:12px; color:var(--text-dim); border-bottom:1px solid var(--line); padding:6px 8px; position:sticky; top:0; background:var(--panel); }
+  table.ticker td{padding:7px 8px; border-bottom:1px solid rgba(36,53,42,0.6); vertical-align:middle;}
+  table.ticker tbody tr:hover{background:rgba(77,255,158,0.04);}
+  .sym{font-family:var(--sans); font-weight:600; letter-spacing:0.4px;}
+  .fac-imperial{color:var(--blue);}
+  .fac-rebel{color:var(--red);}
+  .fac-other{color:var(--amber);}
+  .price{font-weight:600;}
+  .chg{font-size:11px;}
+  .chg.up{color:var(--phosphor);}
+  .chg.down{color:var(--red);}
+  .chg.flat{color:var(--text-dim);}
+  .spark{width:70px; height:24px; display:block;}
+  .buy-btn{ font-family:var(--mono); font-size:11px; background:transparent; border:1px solid var(--phosphor-dim); color:var(--phosphor); padding:4px 9px; border-radius:2px; cursor:pointer; }
+  .buy-btn:hover{background:rgba(77,255,158,0.12);}
+  .empty-state{color:var(--text-dim); font-size:13px; padding:30px 10px; text-align:center;}
+
+  .type-tabs{display:flex; gap:6px; margin-bottom:14px;}
+  .type-tabs button{ flex:1; font-family:var(--sans); font-weight:600; font-size:13px; background:var(--panel-2); border:1px solid var(--line); color:var(--text-dim); padding:8px 4px; border-radius:2px; cursor:pointer; }
+  .type-tabs button.active.call{color:var(--phosphor); border-color:var(--phosphor-dim);}
+  .type-tabs button.active.put{color:var(--red); border-color:var(--red);}
+  .type-tabs button.active.swap{color:var(--purple); border-color:var(--purple);}
+  .type-desc{font-size:11px; color:var(--text-dim); margin-bottom:14px; line-height:1.5; border-left:2px solid var(--line); padding-left:8px;}
+
+  .field{margin-bottom:12px;}
+  .field label{display:block; font-size:11px; color:var(--text-dim); margin-bottom:4px;}
+  .field select, .field input{ width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:7px 8px; font-family:var(--mono); font-size:13px; border-radius:2px; }
+  .field select:focus, .field input:focus{outline:none; border-color:var(--phosphor-dim);}
+  .premium-box{ background:var(--panel-2); border:1px solid var(--line); border-radius:3px; padding:12px; font-size:12px; margin:10px 0 14px; }
+  .premium-box .line{display:flex; justify-content:space-between; padding:2px 0; color:var(--text-dim);}
+  .premium-box .line b{color:var(--text); font-weight:600;}
+  .premium-box .total{border-top:1px solid var(--line); margin-top:6px; padding-top:6px;}
+  .primary-btn{ width:100%; background:var(--phosphor-dim); color:#03130a; border:none; font-family:var(--sans); font-weight:700; font-size:15px; padding:10px; border-radius:2px; cursor:pointer; letter-spacing:0.3px; }
+  .primary-btn:hover{background:var(--phosphor);}
+  .primary-btn:disabled{background:var(--line); color:var(--text-dim); cursor:not-allowed;}
+  .msg{font-size:12px; margin-top:8px; min-height:16px;}
+  .msg.err{color:var(--red);}
+  .msg.ok{color:var(--phosphor);}
+
+  .pos-card{border:1px solid var(--line); border-radius:3px; padding:10px 12px; margin-bottom:10px; font-size:12px;}
+  .pos-card .top{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; flex-wrap:wrap; gap:4px;}
+  .pos-card .top .sym{font-size:14px;}
+  .pos-card .detail{color:var(--text-dim); display:flex; justify-content:space-between;}
+  .pos-card .detail b{color:var(--text);}
+  .pos-card.settled-win{border-color:var(--phosphor-dim); background:rgba(77,255,158,0.05);}
+  .pos-card.settled-loss{border-color:var(--red); background:rgba(255,93,93,0.05);}
+  .pos-card .kind{font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px;}
+  .tag{font-size:10px; padding:1px 6px; border-radius:10px; border:1px solid currentColor;}
+  .tag.open{color:var(--amber);}
+  .tag.win{color:var(--phosphor);}
+  .tag.loss{color:var(--red);}
+
+  .chart-wrap{padding:14px 16px;}
+  .legend-pills{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
+  .legend-pills button{ font-family:var(--mono); font-size:11px; background:var(--panel-2); border:1px solid var(--line); color:var(--text-dim); padding:4px 9px; border-radius:12px; cursor:pointer; }
+  .legend-pills button.active{color:#03130a; font-weight:600;}
+
+  .debug-panel{border-color:#5d3a1a;}
+  .debug-panel .panel-head{background:rgba(255,184,77,0.06);}
+  .debug-panel .panel-head h2{color:var(--amber);}
+  .debug-grid{display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:8px;}
+  .debug-btn{ font-family:var(--mono); font-size:12px; background:var(--panel-2); border:1px solid #5d3a1a; color:var(--amber); padding:8px 10px; border-radius:2px; cursor:pointer; }
+  .debug-btn:hover{background:rgba(255,184,77,0.12);}
+  .debug-inline{display:flex; gap:6px; align-items:center;}
+  .debug-inline input{width:70px; background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:7px 8px; font-family:var(--mono); border-radius:2px;}
+  .dismiss-btn{ font-family:var(--mono); font-size:10px; background:transparent; border:1px solid var(--line); color:var(--text-dim); padding:2px 7px; border-radius:2px; cursor:pointer; margin-left:8px; }
+  .dismiss-btn:hover{border-color:var(--text); color:var(--text);}
+
+  .subnav{max-width:1280px; margin:0 auto; padding:14px 24px 0; display:flex; gap:8px; border-bottom:1px solid var(--line);}
+  .subnav button{ font-family:var(--sans); font-size:15px; font-weight:600; background:transparent; border:none; color:var(--text-dim); padding:8px 4px 12px; cursor:pointer; border-bottom:2px solid transparent; margin-right:14px; }
+  .subnav button.active{color:var(--phosphor); border-bottom-color:var(--phosphor);}
+  .subnav button:hover{color:var(--text);}
+
+  .admin-note{ font-size:11px; color:var(--text-dim); border:1px solid var(--line); border-radius:3px; padding:8px 10px; margin-bottom:12px; line-height:1.5; }
+  .uid-box{ font-size:11px; color:var(--text-dim); border:1px solid var(--line); border-radius:3px; padding:8px 10px; margin-bottom:12px; word-break:break-all; }
+  .uid-box b{color:var(--phosphor); user-select:all;}
+
+  table.history{width:100%; border-collapse:collapse; font-size:13px;}
+  table.history thead th{ text-align:left; font-family:var(--sans); font-weight:600; font-size:12px; color:var(--text-dim); border-bottom:1px solid var(--line); padding:8px; }
+  table.history td{padding:8px; border-bottom:1px solid rgba(36,53,42,0.6);}
+  table.history tr:hover{background:rgba(77,255,158,0.04);}
+  .win-text{color:var(--phosphor);}
+  .loss-text{color:var(--red);}
+  .filter-pills{display:flex; gap:6px; margin-bottom:14px;}
+  .filter-pills button{ font-family:var(--mono); font-size:12px; background:var(--panel-2); border:1px solid var(--line); color:var(--text-dim); padding:5px 12px; border-radius:12px; cursor:pointer; }
+  .filter-pills button.active{color:#03130a; background:var(--phosphor); border-color:var(--phosphor); font-weight:600;}
+  .history-stats{display:flex; gap:24px; margin-bottom:16px; flex-wrap:wrap;}
+  .history-stats .stat{font-size:13px;}
+  .history-stats .stat .label{color:var(--text-dim); font-size:11px;}
+  .history-stats .stat .value{font-size:20px;}
+
+  ::-webkit-scrollbar{width:8px; height:8px;}
+  ::-webkit-scrollbar-track{background:var(--panel);}
+  ::-webkit-scrollbar-thumb{background:var(--line); border-radius:4px;}
+</style>
+</head>
+<body>
+
+<div id="authScreen" class="auth-wrap">
+  <div class="auth-card">
+    <h1>BATTLEFIELD EXCHANGE</h1>
+    <div class="tagline">Sign in to trade. Each account gets its own cash and positions on a shared market.</div>
+    <div class="auth-tabs">
+      <button id="tabSignIn" class="active">Sign In</button>
+      <button id="tabSignUp">Create Account</button>
+    </div>
+    <div class="field"><label>Username</label><input type="text" id="authUsername" autocomplete="username" maxlength="20" placeholder="letters, numbers, underscore"></div>
+    <div class="field"><label>Password</label><input type="password" id="authPassword" autocomplete="current-password"></div>
+    <button class="primary-btn" id="authSubmit">Sign In</button>
+    <div class="auth-msg" id="authMsg"></div>
+  </div>
+</div>
+
+<div id="loadingScreen" class="auth-loading hidden">Connecting to exchange…</div>
+
+<div id="appRoot" class="hidden">
+
+<header class="exchange-header">
+  <div class="brand">
+    <h1>BATTLEFIELD EXCHANGE</h1>
+    <span class="tick" id="dayTick">DAY 0 — AWAITING FIRST REPORT</span>
+  </div>
+  <div class="session-stats">
+    <div class="stat"><div class="label">CASH</div><div class="value" id="statCash">$10,000.00</div></div>
+    <div class="stat"><div class="label">OPEN VALUE</div><div class="value" id="statOpenVal">$0.00</div></div>
+    <div class="stat"><div class="label">REALIZED P&amp;L</div><div class="value" id="statRealized">$0.00</div></div>
+    <div class="stat"><div class="label">NET WORTH</div><div class="value" id="statNet">$10,000.00</div></div>
+    <div class="who">
+      <div><b id="whoUsername"></b><span class="admin-pill hidden" id="adminPill">ADMIN</span></div>
+      <button class="logout-btn" id="logoutBtn">Sign out</button>
+    </div>
+  </div>
+</header>
+
+<nav class="subnav">
+  <button id="navFloor" class="active">Trading Floor</button>
+  <button id="navHistory">Position History</button>
+</nav>
+
+<main>
+  <div id="viewTradingFloor">
+  <div class="grid">
+    <div style="display:flex; flex-direction:column; gap:20px;">
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Battle Reports</h2>
+          <span class="sub">upload a BATTLEFIELD_OVER.html — the market updates for everyone instantly</span>
+        </div>
+        <div class="panel-body">
+          <div class="dropzone" id="dropzone">
+            <div class="big">Drop a battle report .html here</div>
+            <div>or click to browse — file is checked against the required format before it's accepted</div>
+            <input type="file" id="fileInput" accept=".html,.htm">
+          </div>
+          <div class="report-log" id="reportLog"></div>
+        </div>
+      </section>
+
+      <section class="panel debug-panel hidden" id="debugPanel">
+        <div class="panel-head">
+          <h2>Admin / Debug Console</h2>
+          <span class="sub">visible to admins only — enforced server-side, not just hidden UI</span>
+        </div>
+        <div class="panel-body">
+          <div class="admin-note">This panel is hidden client-side, but the real protection is Firestore Security Rules: even if someone forced it visible, the server rejects synthetic reports, day jumps, and report deletes from non-admin accounts.</div>
+          <div class="debug-grid">
+            <button class="debug-btn" id="dbgTestReport">Generate test report (random stats)</button>
+            <button class="debug-btn" id="dbgAdvanceDay">Advance clock +1 (no new data)</button>
+          </div>
+          <div class="debug-inline" style="margin-top:10px;">
+            <span style="font-size:12px; color:var(--text-dim);">Jump clock to day</span>
+            <input type="number" id="dbgJumpDay" min="0" step="1">
+            <button class="debug-btn" id="dbgJumpBtn">Go</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Valuation Model</h2>
+          <span class="sub">what moves a stock's price — local to your view</span>
+        </div>
+        <div class="panel-body">
+          <div class="weight-row"><label>Damage</label><input type="range" id="wDamage" min="0" max="100" value="100"><div class="val" id="wDamageVal">100</div></div>
+          <div class="weight-row"><label>Healing</label><input type="range" id="wHealing" min="0" max="100" value="100"><div class="val" id="wHealingVal">100</div></div>
+          <div class="weight-row"><label>Kills</label><input type="range" id="wKills" min="0" max="100" value="0"><div class="val" id="wKillsVal">0</div></div>
+          <div class="weight-row"><label>Assists</label><input type="range" id="wAssists" min="0" max="100" value="0"><div class="val" id="wAssistsVal">0</div></div>
+          <div class="weight-row"><label>Deaths (drag)</label><input type="range" id="wDeaths" min="0" max="100" value="0"><div class="val" id="wDeathsVal">0</div></div>
+          <div class="weight-note">Price = 100 base + weighted share of that report's best Damage/Healing/etc (each stat scored against the top performer in the same report). These sliders live only in your browser — they don't change what other traders see, just how you're evaluating the same underlying data.</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Ticker</h2><span class="sub" id="tickerSub">no stocks listed yet</span></div>
+        <div class="panel-body" style="padding:0;">
+          <div style="max-height:520px; overflow-y:auto;">
+            <table class="ticker">
+              <thead><tr><th>Symbol</th><th>Faction / Class</th><th>Price</th><th>Chg</th><th>Trend</th><th></th></tr></thead>
+              <tbody id="tickerBody"><tr><td colspan="6" class="empty-state">Upload a battle report to list the first stocks.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Price History</h2><span class="sub">select symbols below to plot</span></div>
+        <div class="chart-wrap">
+          <div class="legend-pills" id="legendPills"></div>
+          <canvas id="priceChart" height="110"></canvas>
+        </div>
+      </section>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:20px;">
+
+      <section class="panel">
+        <div class="panel-head"><h2>Trade</h2><span class="sub">calls, puts &amp; elimination swaps</span></div>
+        <div class="panel-body">
+          <div class="type-tabs">
+            <button class="active call" data-type="call">Call</button>
+            <button class="put" data-type="put">Put</button>
+            <button class="swap" data-type="swap">Elim. Swap</button>
+          </div>
+          <div class="type-desc" id="typeDesc"></div>
+
+          <div class="field"><label>Underlying stock</label><select id="optSymbol"><option value="">— select a stock —</option></select></div>
+
+          <div id="fieldsCallPut">
+            <div class="field"><label>Strike price ($)</label><input type="number" id="optStrike" step="0.01"></div>
+          </div>
+          <div id="fieldsSwap" class="hidden">
+            <div class="field"><label>Trigger: Deaths ≥</label><input type="number" id="swapThreshold" min="1" step="1" value="5"></div>
+            <div class="field"><label>Notional payout if triggered ($)</label><input type="number" id="swapNotional" min="1" step="1" value="500"></div>
+          </div>
+
+          <div class="field"><label>Expires in (future reports)</label><input type="number" id="optExpiry" min="1" step="1" value="2"></div>
+          <div class="field"><label>Contracts</label><input type="number" id="optQty" min="1" step="1" value="1"></div>
+
+          <div class="premium-box" id="premiumBox">
+            <div class="line" id="rowCurrent"><span>Current price</span><b id="pbCurrent">—</b></div>
+            <div class="line" id="rowIntrinsic"><span>Intrinsic value</span><b id="pbIntrinsic">—</b></div>
+            <div class="line" id="rowProb" style="display:none;"><span>Est. trigger probability</span><b id="pbProb">—</b></div>
+            <div class="line"><span id="timeValueLabel">Time value (volatility-based)</span><b id="pbTime">—</b></div>
+            <div class="line total"><span>Premium / contract</span><b id="pbPremium">—</b></div>
+            <div class="line"><span>Total cost</span><b id="pbTotal">—</b></div>
+          </div>
+          <button class="primary-btn" id="buyBtn" disabled>Select a stock first</button>
+          <div class="msg" id="buyMsg"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Positions</h2><span class="sub" id="posSub">0 open</span></div>
+        <div class="panel-body" id="positionsBody"><div class="empty-state">No contracts yet.</div></div>
+      </section>
+
+    </div>
+  </div>
+  </div>
+
+  <div id="viewHistory" class="hidden">
+    <section class="panel">
+      <div class="panel-head"><h2>Position History</h2><span class="sub">every contract you've settled, dismissed or not</span></div>
+      <div class="panel-body">
+        <div class="history-stats" id="historyStats"></div>
+        <div class="filter-pills" id="historyFilters">
+          <button data-filter="all" class="active">All</button>
+          <button data-filter="won">Won</button>
+          <button data-filter="lost">Lost</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="history">
+            <thead><tr><th>Type</th><th>Symbol</th><th>Strike/Trigger</th><th>Bought</th><th>Expiry</th><th>Settled</th><th>Contracts</th><th>Premium</th><th>Payoff</th><th>Net P&amp;L</th><th>Result</th></tr></thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
+  signInWithEmailAndPassword, signOut
+} from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
+import {
+  getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
+  collection, addDoc, onSnapshot, query, orderBy,
+  runTransaction, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
+
+// PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
+// Firebase console -> Project settings -> General -> Your apps -> SDK setup and configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyAXn_FKCuNZFImAdPt9y6gPTeWHSxuzOos",
+  authDomain: "battlefieldexchange-85f14.firebaseapp.com",
+  projectId: "battlefieldexchange-85f14",
+  storageBucket: "battlefieldexchange-85f14.firebasestorage.app",
+  messagingSenderId: "802549348290",
+  appId: "1:802549348290:web:562dee7a3a13eeca49c85b"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const state = {
+  uid: null, username: null, isAdmin: false,
+  reports: [], day: 0, players: {},
+  cash: 10000, realized: 0, positions: [],
+  selectedSymbols: new Set(), tradeType: 'call', historyFilter: 'all'
+};
+const weights = { damage: 1.0, healing: 1.0, kills: 0, assists: 0, deaths: 0 };
+let unsubReports = null, unsubPositions = null, unsubUserDoc = null;
+let pendingUsername = null;
+
+// Firebase Auth only understands email/phone/OAuth identities, not "usernames" —
+// so we generate a private, never-shown fake email from the username and use that
+// everywhere under the hood. Firebase's own one-account-per-email rule means two
+// people can't grab the same username: the second signup just fails naturally.
+function usernameToAuthEmail(username){
+  return username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') + '@players.battlefield-exchange.local';
+}
+function isValidUsername(username){
+  return /^[A-Za-z0-9_]{3,20}$/.test(username.trim());
+}
+
+const authScreen = document.getElementById('authScreen');
+const loadingScreen = document.getElementById('loadingScreen');
+const appRoot = document.getElementById('appRoot');
+let authMode = 'signin';
+
+document.getElementById('tabSignIn').addEventListener('click', () => setAuthMode('signin'));
+document.getElementById('tabSignUp').addEventListener('click', () => setAuthMode('signup'));
+function setAuthMode(mode){
+  authMode = mode;
+  document.getElementById('tabSignIn').classList.toggle('active', mode==='signin');
+  document.getElementById('tabSignUp').classList.toggle('active', mode==='signup');
+  document.getElementById('authSubmit').textContent = mode==='signin' ? 'Sign In' : 'Create Account';
+  document.getElementById('authMsg').textContent = '';
+}
+
+document.getElementById('authSubmit').addEventListener('click', async () => {
+  const username = document.getElementById('authUsername').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const msg = document.getElementById('authMsg');
+  msg.className = 'auth-msg'; msg.textContent = '';
+  if(!username || !password){ msg.className='auth-msg err'; msg.textContent='Enter a username and password.'; return; }
+  if(!isValidUsername(username)){ msg.className='auth-msg err'; msg.textContent='Username must be 3-20 characters: letters, numbers, underscore only.'; return; }
+  const authEmail = usernameToAuthEmail(username);
+  try{
+    if(authMode === 'signin') await signInWithEmailAndPassword(auth, authEmail, password);
+    else {
+      pendingUsername = username;
+      await createUserWithEmailAndPassword(auth, authEmail, password);
+    }
+  }catch(err){
+    pendingUsername = null;
+    msg.className = 'auth-msg err';
+    msg.textContent = friendlyAuthError(err);
+  }
+});
+function friendlyAuthError(err){
+  const code = err.code || '';
+  if(code.includes('auth/email-already-in-use')) return 'That username is already taken — try signing in instead.';
+  if(code.includes('auth/invalid-credential') || code.includes('auth/wrong-password')) return 'Wrong username or password.';
+  if(code.includes('auth/weak-password')) return 'Password should be at least 6 characters.';
+  if(code.includes('auth/invalid-email')) return 'That username has characters Firebase can\'t accept — stick to letters, numbers, and underscores.';
+  if(code.includes('auth/unauthorized-domain')) return "This domain isn't authorized in Firebase yet — add it under Authentication -> Settings -> Authorized domains.";
+  return err.message || 'Something went wrong.';
+}
+
+document.getElementById('logoutBtn').addEventListener('click', () => signOut(auth));
+
+onAuthStateChanged(auth, async (user) => {
+  teardownSubscriptions();
+  if(!user){
+    appRoot.classList.add('hidden');
+    loadingScreen.classList.add('hidden');
+    authScreen.classList.remove('hidden');
+    return;
+  }
+  authScreen.classList.add('hidden');
+  loadingScreen.classList.remove('hidden');
+
+  state.uid = user.uid;
+
+  const userRef = doc(db, 'users', user.uid);
+  const snap = await getDoc(userRef);
+  if(!snap.exists()){
+    const username = pendingUsername || user.email.split('@')[0];
+    await setDoc(userRef, { username, cash: 10000, realized: 0, createdAt: serverTimestamp() });
+    state.username = username;
+  } else {
+    state.username = snap.data().username || user.email.split('@')[0];
+  }
+  pendingUsername = null;
+  document.getElementById('whoUsername').textContent = state.username;
+
+  try{
+    const adminSnap = await getDoc(doc(db, 'admins', user.uid));
+    state.isAdmin = adminSnap.exists();
+  }catch(e){ state.isAdmin = false; }
+  document.getElementById('debugPanel').classList.toggle('hidden', !state.isAdmin);
+  document.getElementById('adminPill').classList.toggle('hidden', !state.isAdmin);
+  if(state.isAdmin) addUidBoxIfMissing(user.uid);
+
+  subscribeToMarket();
+  subscribeToUserDoc(userRef);
+  subscribeToPositions(user.uid);
+
+  loadingScreen.classList.add('hidden');
+  appRoot.classList.remove('hidden');
+});
+
+function teardownSubscriptions(){
+  if(unsubReports){ unsubReports(); unsubReports = null; }
+  if(unsubUserDoc){ unsubUserDoc(); unsubUserDoc = null; }
+  if(unsubPositions){ unsubPositions(); unsubPositions = null; }
+}
+
+function addUidBoxIfMissing(uid){
+  if(document.getElementById('uidBox')) return;
+  const box = document.createElement('div');
+  box.id = 'uidBox';
+  box.className = 'uid-box';
+  box.innerHTML = 'Your UID (to grant admin to others via the Firebase console <code>admins</code> collection): <b>' + uid + '</b>';
+  document.getElementById('debugPanel').querySelector('.panel-body').prepend(box);
+}
+
+const REQUIRED_HEADERS = ['name','profession','faction','kills','assists','deaths','damage','largest performed hit','damage taken','healing','largest heal','captures'];
+
+function validateAndParseReportHTML(text){
+  const doc_ = new DOMParser().parseFromString(text, 'text/html');
+  const table = doc_.querySelector('table');
+  if(!table) return { valid:false, error:'No <table> element found in this file.' };
+  const rows = Array.from(table.querySelectorAll('tr'));
+  if(rows.length < 2) return { valid:false, error:'Table has no data rows.' };
+
+  const headerCells = Array.from(rows[0].querySelectorAll('th,td')).map(c => c.textContent.trim().toLowerCase());
+  const missing = REQUIRED_HEADERS.filter(h => !headerCells.includes(h));
+  if(missing.length) return { valid:false, error:'Not a recognized battle report — missing column(s): ' + missing.join(', ') };
+
+  const colIndex = {};
+  headerCells.forEach((h,i) => { if(REQUIRED_HEADERS.includes(h)) colIndex[h] = i; });
+
+  const players = [];
+  for(let r=1; r<rows.length; r++){
+    const cells = Array.from(rows[r].querySelectorAll('td'));
+    if(cells.length === 0) continue;
+    const get = (h) => cells[colIndex[h]] ? cells[colIndex[h]].textContent.trim() : '';
+    const num = (h) => { const v = parseFloat(get(h)); return isNaN(v) ? 0 : v; };
+    const name = get('name');
+    if(!name) continue;
+    players.push({
+      name, profession: get('profession') || 'Unknown', faction: get('faction') || 'Unknown',
+      kills: num('kills'), assists: num('assists'), deaths: num('deaths'),
+      damage: num('damage'), largestHit: num('largest performed hit'), damageTaken: num('damage taken'),
+      healing: num('healing'), largestHeal: num('largest heal'), captures: num('captures')
+    });
+  }
+  if(players.length === 0) return { valid:false, error:'Header row matched, but no player rows could be parsed.' };
+  return { valid:true, players };
+}
+
+async function submitReport(players, filename, isSynthetic){
+  const counterRef = doc(db, 'counters', 'day');
+  const reportsCol = collection(db, 'reports');
+  let assignedDay;
+  await runTransaction(db, async (tx) => {
+    const counterSnap = await tx.get(counterRef);
+    const current = counterSnap.exists() ? counterSnap.data().value : 0;
+    assignedDay = current + 1;
+    tx.set(counterRef, { value: assignedDay });
+    const newReportRef = doc(reportsCol);
+    tx.set(newReportRef, {
+      day: assignedDay, filename, uploadedBy: state.uid, uploadedByUsername: state.username,
+      uploadedAt: serverTimestamp(), isSynthetic: !!isSynthetic, players
+    });
+  });
+  return assignedDay;
+}
+
+function readFileAsText(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(e.target.result);
+    reader.onerror = () => reject(new Error('Could not read file.'));
+    reader.readAsText(file);
+  });
+}
+
+async function handleUpload(file){
+  try{
+    const text = await readFileAsText(file);
+    const result = validateAndParseReportHTML(text);
+    if(!result.valid){ addReportLogRow(file.name, 'REJECTED: ' + result.error, true); return; }
+    const day = await submitReport(result.players, file.name, false);
+    addReportLogRow(file.name, 'Accepted — day ' + day + ', ' + result.players.length + ' stocks', false);
+  }catch(err){
+    addReportLogRow(file.name, 'ERROR: ' + err.message, true);
+  }
+}
+
+function addReportLogRow(filename, msg, isError){
+  const log = document.getElementById('reportLog');
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.setAttribute('data-manual','1');
+  row.innerHTML = '<span>' + escapeHtml(filename) + '</span><span style="color:' + (isError?'var(--red)':'') + '">' + escapeHtml(msg) + '</span>';
+  log.prepend(row);
+}
+
+function subscribeToMarket(){
+  const q = query(collection(db, 'reports'), orderBy('day'));
+  unsubReports = onSnapshot(q, (snap) => {
+    state.reports = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    state.day = state.reports.reduce((max,r) => Math.max(max, r.day), 0);
+    recomputeAllPrices();
+    checkAndSettlePositions();
+    renderAll();
+  });
+}
+function subscribeToUserDoc(userRef){
+  unsubUserDoc = onSnapshot(userRef, (snap) => {
+    if(!snap.exists()) return;
+    const d = snap.data();
+    state.cash = d.cash; state.realized = d.realized;
+    renderStats();
+  });
+}
+function subscribeToPositions(uid){
+  const q = collection(db, 'users', uid, 'positions');
+  unsubPositions = onSnapshot(q, (snap) => {
+    state.positions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderPositions(); renderHistory(); renderStats();
+  });
+}
+
+function recomputeAllPrices(){
+  const players = {};
+  state.reports.forEach(rep => {
+    rep.players.forEach(p => {
+      if(!players[p.name]) players[p.name] = { name:p.name, faction:p.faction, profession:p.profession, history:[], priceHistory:[] };
+      players[p.name].faction = p.faction;
+      players[p.name].profession = p.profession;
+      players[p.name].history.push(Object.assign({ day: rep.day }, p));
+    });
+  });
+  const dayGroups = {};
+  Object.values(players).forEach(p => p.history.forEach(h => {
+    dayGroups[h.day] = dayGroups[h.day] || [];
+    dayGroups[h.day].push({ name: p.name, stats: h });
+  }));
+  Object.keys(dayGroups).map(Number).sort((a,b)=>a-b).forEach(day => {
+    const rows = dayGroups[day];
+    const maxOf = (key) => Math.max(1, ...rows.map(r => r.stats[key] || 0));
+    const maxDamage = maxOf('damage'), maxHealing = maxOf('healing'), maxKills = maxOf('kills'),
+          maxAssists = maxOf('assists'), maxDeaths = maxOf('deaths');
+    rows.forEach(r => {
+      const s = r.stats;
+      let price = 100;
+      price += (s.damage / maxDamage) * 4 * weights.damage;
+      price += (s.healing / maxHealing) * 4 * weights.healing;
+      price += (s.kills / maxKills) * 4 * weights.kills;
+      price += (s.assists / maxAssists) * 4 * weights.assists;
+      price -= (s.deaths / maxDeaths) * 4 * weights.deaths;
+      price = Math.max(1, price);
+      players[r.name].priceHistory.push({ day, price: Math.round(price*100)/100 });
+    });
+  });
+  state.players = players;
+}
+
+function currentPrice(symbol){
+  const p = state.players[symbol];
+  if(!p || p.priceHistory.length === 0) return null;
+  return p.priceHistory[p.priceHistory.length-1].price;
+}
+function priceAtOrBefore(symbol, day){
+  const p = state.players[symbol];
+  if(!p) return null;
+  let best = null;
+  p.priceHistory.forEach(ph => { if(ph.day <= day) best = ph.price; });
+  if(best === null && p.priceHistory.length) best = p.priceHistory[0].price;
+  return best;
+}
+function volatility(symbol){
+  const p = state.players[symbol];
+  if(!p || p.priceHistory.length < 2) return 0.25;
+  const prices = p.priceHistory.map(x=>x.price);
+  const returns = [];
+  for(let i=1;i<prices.length;i++) if(prices[i-1]>0) returns.push((prices[i]-prices[i-1])/prices[i-1]);
+  if(returns.length===0) return 0.25;
+  const mean = returns.reduce((a,b)=>a+b,0)/returns.length;
+  const variance = returns.reduce((a,b)=>a+Math.pow(b-mean,2),0)/returns.length;
+  return Math.max(0.05, Math.sqrt(variance));
+}
+function computeOptionPremium(symbol, strike, daysToExpiry, isPut){
+  const price = currentPrice(symbol);
+  if(price === null) return null;
+  const intrinsic = isPut ? Math.max(0, strike-price) : Math.max(0, price-strike);
+  const vol = volatility(symbol);
+  const timeValue = price * vol * Math.sqrt(Math.max(1,daysToExpiry)) * 0.4;
+  const premium = Math.max(0.5, intrinsic + timeValue);
+  return { price, intrinsic, timeValue, premium: Math.round(premium*100)/100 };
+}
+function estimateTriggerProbability(symbol, threshold){
+  const p = state.players[symbol];
+  if(!p || p.history.length < 2) return 0.2;
+  const hits = p.history.filter(h => h.deaths >= threshold).length;
+  return Math.max(0.03, hits / p.history.length);
+}
+function computeSwapPremium(symbol, threshold, notional, daysToExpiry){
+  const perReportProb = estimateTriggerProbability(symbol, threshold);
+  const probAtLeastOnce = 1 - Math.pow(1-perReportProb, Math.max(1,daysToExpiry));
+  const premium = Math.max(0.5, notional * probAtLeastOnce * 1.15);
+  return { perReportProb, probAtLeastOnce, premium: Math.round(premium*100)/100 };
+}
+
+const TEST_PROFESSIONS = ['Commando','Bounty Hunter','Officer','Smuggler','Medic','Jedi'];
+const TEST_FACTIONS = ['Imperial','Rebel'];
+function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+
+document.getElementById('dbgTestReport').addEventListener('click', async () => {
+  let names = Object.keys(state.players);
+  if(names.length === 0) names = ['TESTPLAYER1','TESTPLAYER2','TESTPLAYER3','TESTPLAYER4'];
+  const players = names.map(name => {
+    const existing = state.players[name];
+    return {
+      name,
+      faction: existing ? existing.faction : TEST_FACTIONS[randInt(0,1)],
+      profession: existing ? existing.profession : TEST_PROFESSIONS[randInt(0,TEST_PROFESSIONS.length-1)],
+      kills: randInt(0,12), assists: randInt(0,35), deaths: randInt(0,8),
+      damage: randInt(50000,1500000), largestHit: randInt(1000,12000),
+      damageTaken: randInt(50000,900000), healing: randInt(0,2200000),
+      largestHeal: randInt(0,55000), captures: randInt(0,2)
+    };
+  });
+  try{ await submitReport(players, '[debug] synthetic report', true); }
+  catch(err){ alert('Could not create synthetic report: ' + err.message); }
+});
+
+document.getElementById('dbgAdvanceDay').addEventListener('click', async () => {
+  const counterRef = doc(db, 'counters', 'day');
+  try{
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(counterRef);
+      const current = snap.exists() ? snap.data().value : 0;
+      tx.set(counterRef, { value: current + 1 });
+    });
+  }catch(err){ alert('Could not advance the clock: ' + err.message); }
+});
+
+document.getElementById('dbgJumpBtn').addEventListener('click', async () => {
+  const target = parseInt(document.getElementById('dbgJumpDay').value, 10);
+  if(isNaN(target) || target < state.day){ alert('Enter a day greater than the current day (' + state.day + ').'); return; }
+  try{ await setDoc(doc(db,'counters','day'), { value: target }); }
+  catch(err){ alert('Could not jump the clock: ' + err.message); }
+});
+
+async function deleteReport(reportId){
+  if(!confirm('Delete this report from the shared market? Prices for everyone will recompute without it.')) return;
+  try{ await deleteDoc(doc(db, 'reports', reportId)); }
+  catch(err){ alert('Could not delete report: ' + err.message); }
+}
+
+document.querySelectorAll('.type-tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.tradeType = btn.dataset.type;
+    document.querySelectorAll('.type-tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('fieldsCallPut').classList.toggle('hidden', state.tradeType==='swap');
+    document.getElementById('fieldsSwap').classList.toggle('hidden', state.tradeType!=='swap');
+    document.getElementById('rowIntrinsic').style.display = state.tradeType==='swap' ? 'none' : 'flex';
+    document.getElementById('rowProb').style.display = state.tradeType==='swap' ? 'flex' : 'none';
+    document.getElementById('timeValueLabel').textContent = state.tradeType==='swap' ? 'Risk-adjusted premium load' : 'Time value (volatility-based)';
+    const descs = {
+      call: 'Call: pays off if the stock finishes ABOVE your strike at expiry. Payoff = max(0, settle price minus strike) x contracts.',
+      put: 'Put: pays off if the stock finishes BELOW your strike at expiry. Payoff = max(0, strike minus settle price) x contracts.',
+      swap: "Elimination Swap (a fictional credit-default-swap analog): you're buying protection that pays a fixed notional the moment the player's Deaths in any single report hit your trigger, any time before expiry, not just at expiry. If it never triggers, it expires worthless."
+    };
+    document.getElementById('typeDesc').textContent = descs[state.tradeType];
+    renderPremiumPreview();
+  });
+});
+document.querySelector('.type-tabs button[data-type="call"]').click();
+
+async function buyContract(){
+  const symbol = document.getElementById('optSymbol').value;
+  const expiryDays = parseInt(document.getElementById('optExpiry').value,10);
+  const qty = parseInt(document.getElementById('optQty').value,10);
+  const msgEl = document.getElementById('buyMsg');
+  msgEl.className='msg'; msgEl.textContent='';
+
+  if(!symbol){ msgEl.className='msg err'; msgEl.textContent='Pick a stock first.'; return; }
+  if(isNaN(expiryDays)||expiryDays<1){ msgEl.className='msg err'; msgEl.textContent='Expiry must be at least 1 day out.'; return; }
+  if(isNaN(qty)||qty<1){ msgEl.className='msg err'; msgEl.textContent='Enter a valid contract quantity.'; return; }
+
+  if(state.tradeType === 'swap'){
+    const threshold = parseInt(document.getElementById('swapThreshold').value,10);
+    const notional = parseFloat(document.getElementById('swapNotional').value);
+    if(isNaN(threshold)||threshold<1){ msgEl.className='msg err'; msgEl.textContent='Enter a valid trigger threshold.'; return; }
+    if(isNaN(notional)||notional<=0){ msgEl.className='msg err'; msgEl.textContent='Enter a valid notional payout.'; return; }
+    const calc = computeSwapPremium(symbol, threshold, notional, expiryDays);
+    const totalCost = Math.round(calc.premium*qty*100)/100;
+    if(totalCost > state.cash){ msgEl.className='msg err'; msgEl.textContent='Not enough cash. Need ' + fmtMoney(totalCost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
+    const positionData = {
+      type:'swap', symbol, threshold, notional, expiryDay: state.day+expiryDays,
+      qty, premium: calc.premium, boughtDay: state.day, status:'open', settlePrice:null, dismissed:false
+    };
+    await commitTrade(positionData, totalCost, 'Bought ' + qty + 'x ' + symbol + ' elimination swap (trigger: deaths >= ' + threshold + ')', msgEl);
+  } else {
+    const strike = parseFloat(document.getElementById('optStrike').value);
+    if(isNaN(strike)||strike<=0){ msgEl.className='msg err'; msgEl.textContent='Enter a valid strike price.'; return; }
+    const calc = computeOptionPremium(symbol, strike, expiryDays, state.tradeType==='put');
+    if(!calc){ msgEl.className='msg err'; msgEl.textContent='No price data for that stock yet.'; return; }
+    const totalCost = Math.round(calc.premium*qty*100)/100;
+    if(totalCost > state.cash){ msgEl.className='msg err'; msgEl.textContent='Not enough cash. Need ' + fmtMoney(totalCost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
+    const positionData = {
+      type: state.tradeType, symbol, strike, expiryDay: state.day+expiryDays,
+      qty, premium: calc.premium, boughtDay: state.day, status:'open', settlePrice:null, dismissed:false
+    };
+    await commitTrade(positionData, totalCost, 'Bought ' + qty + 'x ' + symbol + ' $' + strike.toFixed(2) + ' ' + state.tradeType, msgEl);
+  }
+}
+
+async function commitTrade(positionData, totalCost, successMsg, msgEl){
+  try{
+    await addDoc(collection(db,'users',state.uid,'positions'), positionData);
+    const userRef = doc(db,'users',state.uid);
+    await updateDoc(userRef, { cash: state.cash - totalCost });
+    msgEl.className='msg ok'; msgEl.textContent = successMsg + ', expiring day ' + positionData.expiryDay + '.';
+  }catch(err){
+    msgEl.className='msg err'; msgEl.textContent = 'Trade failed: ' + err.message;
+  }
+}
+document.getElementById('buyBtn').addEventListener('click', buyContract);
+
+async function settleOptionPosition(pos, settleDay){
+  const settlePrice = priceAtOrBefore(pos.symbol, settleDay) ?? currentPrice(pos.symbol) ?? 0;
+  const payoff = pos.type === 'put'
+    ? Math.max(0, pos.strike - settlePrice) * pos.qty
+    : Math.max(0, settlePrice - pos.strike) * pos.qty;
+  await applySettlement(pos, settlePrice, payoff);
+}
+async function settleSwapPosition(pos, triggered){
+  const settlePrice = currentPrice(pos.symbol) ?? 0;
+  const payoff = triggered ? pos.notional * pos.qty : 0;
+  await applySettlement(pos, settlePrice, payoff);
+}
+async function applySettlement(pos, settlePrice, payoff){
+  const cost = pos.premium * pos.qty;
+  const status = payoff > 0 ? 'won' : 'lost';
+  await updateDoc(doc(db,'users',state.uid,'positions',pos.id), { status, settlePrice, payoff });
+  const userRef = doc(db,'users',state.uid);
+  await updateDoc(userRef, { cash: state.cash + payoff, realized: state.realized + (payoff - cost) });
+}
+
+async function checkAndSettlePositions(){
+  for(const pos of state.positions){
+    if(pos.status !== 'open') continue;
+    if(pos.type === 'swap'){
+      const relevantReports = state.reports
+        .filter(r => r.day > pos.boughtDay && r.day <= pos.expiryDay)
+        .sort((a,b) => a.day - b.day);
+      let triggered = false;
+      for(const rep of relevantReports){
+        const row = rep.players.find(p => p.name === pos.symbol);
+        if(row && row.deaths >= pos.threshold){ triggered = true; break; }
+      }
+      if(triggered){ await settleSwapPosition(pos, true); }
+      else if(state.day >= pos.expiryDay){ await settleSwapPosition(pos, false); }
+    } else {
+      if(state.day >= pos.expiryDay){ await settleOptionPosition(pos, pos.expiryDay); }
+    }
+  }
+}
+
+async function dismissPosition(posId){
+  await updateDoc(doc(db,'users',state.uid,'positions',posId), { dismissed: true });
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function factionClass(f){ const s=(f||'').toLowerCase(); if(s.includes('imperial')) return 'fac-imperial'; if(s.includes('rebel')) return 'fac-rebel'; return 'fac-other'; }
+function fmtMoney(n){ return '$' + Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+let chart = null;
+function renderChart(){
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  const symbols = Array.from(state.selectedSymbols);
+  const palette = ['#4dff9e','#5db8ff','#ffb84d','#ff5d5d','#c792ea','#7fd1ff','#ffe066'];
+  const datasets = symbols.map((sym,i) => ({
+    label: sym,
+    data: state.players[sym] ? state.players[sym].priceHistory.map(h=>({x:h.day,y:h.price})) : [],
+    borderColor: palette[i%palette.length], backgroundColor:'transparent', tension:0.25, pointRadius:3
+  }));
+  if(chart) chart.destroy();
+  chart = new Chart(ctx, { type:'line', data:{datasets}, options:{
+    responsive:true, interaction:{mode:'nearest',intersect:false},
+    scales:{ x:{type:'linear',ticks:{color:'#7fa08c',stepSize:1,callback:v=>'Day '+v},grid:{color:'#1b271f'},title:{display:true,text:'Trading day',color:'#7fa08c'}},
+             y:{ticks:{color:'#7fa08c'},grid:{color:'#1b271f'}} },
+    plugins:{ legend:{labels:{color:'#d7ecdf'}} }
+  }});
+}
+
+function sparkline(priceHistory){
+  const w=70,h=24;
+  if(priceHistory.length<2) return '<svg class="spark" viewBox="0 0 ' + w + ' ' + h + '"></svg>';
+  const prices = priceHistory.map(p=>p.price);
+  const min=Math.min(...prices), max=Math.max(...prices), range=(max-min)||1;
+  const step = w/(prices.length-1);
+  const pts = prices.map((p,i)=>(i*step).toFixed(1)+','+(h-((p-min)/range)*h).toFixed(1)).join(' ');
+  const color = prices[prices.length-1] >= prices[0] ? '#4dff9e' : '#ff5d5d';
+  return '<svg class="spark" viewBox="0 0 ' + w + ' ' + h + '"><polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.6"/></svg>';
+}
+
+function renderTicker(){
+  const body = document.getElementById('tickerBody');
+  const symbols = Object.keys(state.players).sort((a,b)=>(currentPrice(b)||0)-(currentPrice(a)||0));
+  document.getElementById('tickerSub').textContent = symbols.length ? (symbols.length + ' stocks listed — day ' + state.day) : 'no stocks listed yet';
+
+  if(symbols.length===0){
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">Upload a battle report to list the first stocks.</td></tr>';
+  } else {
+    body.innerHTML = symbols.map(sym => {
+      const p = state.players[sym];
+      const ph = p.priceHistory;
+      const price = ph[ph.length-1].price;
+      const prev = ph.length>1 ? ph[ph.length-2].price : price;
+      const chg = price-prev, chgPct = prev ? (chg/prev*100) : 0;
+      const chgClass = chg>0?'up':chg<0?'down':'flat';
+      const arrow = chg>0?'▲':chg<0?'▼':'—';
+      return '<tr>'
+        + '<td><div class="sym">' + escapeHtml(sym) + '</div></td>'
+        + '<td><span class="' + factionClass(p.faction) + '">' + escapeHtml(p.faction) + '</span> · ' + escapeHtml(p.profession) + '</td>'
+        + '<td class="price">' + fmtMoney(price) + '</td>'
+        + '<td class="chg ' + chgClass + '">' + arrow + ' ' + (chg>=0?'+':'') + chg.toFixed(2) + ' (' + chgPct.toFixed(1) + '%)</td>'
+        + '<td>' + sparkline(ph) + '</td>'
+        + '<td><button class="buy-btn" data-symbol="' + escapeHtml(sym) + '">Trade</button></td>'
+        + '</tr>';
+    }).join('');
+    body.querySelectorAll('.buy-btn').forEach(btn => btn.addEventListener('click', () => {
+      document.getElementById('optSymbol').value = btn.dataset.symbol;
+      document.getElementById('optSymbol').dispatchEvent(new Event('change'));
+    }));
+  }
+
+  const sel = document.getElementById('optSymbol');
+  const prevVal = sel.value;
+  sel.innerHTML = '<option value="">— select a stock —</option>' + symbols.map(s=>'<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + ' — ' + fmtMoney(currentPrice(s)) + '</option>').join('');
+  if(symbols.includes(prevVal)) sel.value = prevVal;
+
+  const pills = document.getElementById('legendPills');
+  pills.innerHTML = symbols.slice(0,30).map(s=>'<button data-symbol="' + escapeHtml(s) + '" class="' + (state.selectedSymbols.has(s)?'active':'') + '">' + escapeHtml(s) + '</button>').join('');
+  pills.querySelectorAll('button').forEach(btn => {
+    btn.style.background = state.selectedSymbols.has(btn.dataset.symbol) ? 'var(--phosphor-dim)' : '';
+    btn.addEventListener('click', () => {
+      if(state.selectedSymbols.has(btn.dataset.symbol)) state.selectedSymbols.delete(btn.dataset.symbol);
+      else state.selectedSymbols.add(btn.dataset.symbol);
+      renderTicker(); renderChart();
+    });
+  });
+
+  document.getElementById('dayTick').textContent = state.reports.length
+    ? ('DAY ' + state.day + ' — ' + state.reports.length + ' report' + (state.reports.length>1?'s':'') + ' on record')
+    : 'DAY 0 — AWAITING FIRST REPORT';
+
+  renderReportLogFromState();
+}
+
+function renderReportLogFromState(){
+  const log = document.getElementById('reportLog');
+  const sorted = [...state.reports].sort((a,b) => b.day - a.day);
+  Array.from(log.querySelectorAll('.row:not([data-manual])')).forEach(r => r.remove());
+  sorted.forEach(rep => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const delBtn = state.isAdmin ? '<button class="del-report" data-reportid="' + rep.id + '">Delete</button>' : '';
+    row.innerHTML = '<span>Day ' + rep.day + ' · ' + escapeHtml(rep.filename) + (rep.isSynthetic?' [synthetic]':'') + '</span><span>' + rep.players.length + ' stocks · by ' + escapeHtml(rep.uploadedByUsername||'?') + ' ' + delBtn + '</span>';
+    log.appendChild(row);
+  });
+  log.querySelectorAll('.del-report').forEach(btn => btn.addEventListener('click', () => deleteReport(btn.dataset.reportid)));
+}
+
+function renderPremiumPreview(){
+  const symbol = document.getElementById('optSymbol').value;
+  const expiryDays = parseInt(document.getElementById('optExpiry').value,10)||1;
+  const qty = parseInt(document.getElementById('optQty').value,10)||1;
+  const buyBtn = document.getElementById('buyBtn');
+
+  if(!symbol){
+    ['pbCurrent','pbIntrinsic','pbProb','pbTime','pbPremium','pbTotal'].forEach(id=>document.getElementById(id).textContent='—');
+    buyBtn.disabled = true; buyBtn.textContent = 'Select a stock first';
+    return;
+  }
+  const price = currentPrice(symbol);
+  document.getElementById('pbCurrent').textContent = fmtMoney(price);
+
+  if(state.tradeType === 'swap'){
+    const threshold = parseInt(document.getElementById('swapThreshold').value,10) || 1;
+    const notional = parseFloat(document.getElementById('swapNotional').value) || 0;
+    const calc = computeSwapPremium(symbol, threshold, notional, expiryDays);
+    document.getElementById('pbProb').textContent = (calc.probAtLeastOnce*100).toFixed(1) + '%';
+    document.getElementById('pbTime').textContent = fmtMoney(calc.premium);
+    document.getElementById('pbPremium').textContent = fmtMoney(calc.premium);
+    document.getElementById('pbTotal').textContent = fmtMoney(calc.premium*qty);
+    buyBtn.disabled = false;
+    buyBtn.textContent = 'Buy ' + qty + 'x ' + symbol + ' Elim. Swap';
+  } else {
+    const strikeInput = document.getElementById('optStrike');
+    if(!strikeInput.value && price) strikeInput.value = price.toFixed(2);
+    const strike = parseFloat(strikeInput.value) || price;
+    const calc = computeOptionPremium(symbol, strike, expiryDays, state.tradeType==='put');
+    if(!calc) return;
+    document.getElementById('pbIntrinsic').textContent = fmtMoney(calc.intrinsic);
+    document.getElementById('pbTime').textContent = fmtMoney(calc.timeValue);
+    document.getElementById('pbPremium').textContent = fmtMoney(calc.premium);
+    document.getElementById('pbTotal').textContent = fmtMoney(calc.premium*qty);
+    buyBtn.disabled = false;
+    buyBtn.textContent = 'Buy ' + qty + 'x ' + symbol + ' $' + strike.toFixed(2) + ' ' + (state.tradeType==='put'?'Put':'Call');
+  }
+}
+
+function renderPositions(){
+  const body = document.getElementById('positionsBody');
+  const visible = state.positions.filter(p => p.status==='open' || !p.dismissed);
+  const open = state.positions.filter(p=>p.status==='open');
+  document.getElementById('posSub').textContent = open.length + ' open';
+  if(visible.length===0){ body.innerHTML = '<div class="empty-state">No contracts yet.</div>'; return; }
+  const sorted = [...visible].sort((a,b) => (b.boughtDay - a.boughtDay));
+  body.innerHTML = sorted.map(renderPositionCard).join('');
+  body.querySelectorAll('[data-dismissid]').forEach(btn => btn.addEventListener('click', () => dismissPosition(btn.dataset.dismissid)));
+}
+
+function renderPositionCard(pos){
+  const price = currentPrice(pos.symbol) || 0;
+  const kindLabel = pos.type==='swap' ? 'Elimination Swap' : (pos.type==='put'?'Put':'Call');
+  if(pos.status === 'open'){
+    const daysLeft = pos.expiryDay - state.day;
+    let mainLine, markValue;
+    if(pos.type === 'swap'){
+      mainLine = 'Trigger: deaths >= ' + pos.threshold + ' · Notional ' + fmtMoney(pos.notional);
+      markValue = 0;
+    } else {
+      markValue = pos.type==='put' ? Math.max(0,pos.strike-price)*pos.qty : Math.max(0,price-pos.strike)*pos.qty;
+      mainLine = 'Strike ' + fmtMoney(pos.strike) + ' · Current ' + fmtMoney(price);
+    }
+    return '<div class="pos-card">'
+      + '<div class="top"><span class="kind">' + kindLabel + '</span><span class="sym">' + escapeHtml(pos.symbol) + '</span><span class="tag open">OPEN · ' + (daysLeft<=0?'settles next tick':daysLeft+' day'+(daysLeft!==1?'s':'')+' left') + '</span></div>'
+      + '<div class="detail"><span>' + mainLine + '</span></div>'
+      + '<div class="detail"><span>Contracts</span><b>' + pos.qty + '</b></div>'
+      + '<div class="detail"><span>Premium paid</span><b>' + fmtMoney(pos.premium*pos.qty) + '</b></div>'
+      + (pos.type!=='swap' ? ('<div class="detail"><span>Mark-to-market</span><b>' + fmtMoney(markValue) + '</b></div>') : '')
+      + '</div>';
+  } else {
+    const cls = pos.status==='won' ? 'settled-win' : 'settled-loss';
+    const netPl = pos.payoff - (pos.premium*pos.qty);
+    return '<div class="pos-card ' + cls + '">'
+      + '<div class="top"><span class="kind">' + kindLabel + '</span><span class="sym">' + escapeHtml(pos.symbol) + '</span><span class="tag ' + (pos.status==='won'?'win':'loss') + '">' + (pos.status==='won'?'SETTLED — WON':'SETTLED — LOST') + '<button class="dismiss-btn" data-dismissid="' + pos.id + '">Dismiss</button></span></div>'
+      + '<div class="detail"><span>Settled at</span><b>' + fmtMoney(pos.settlePrice||0) + '</b></div>'
+      + '<div class="detail"><span>Payoff</span><b>' + fmtMoney(pos.payoff) + '</b></div>'
+      + '<div class="detail"><span>Net P&amp;L</span><b style="color:' + (netPl>=0?'var(--phosphor)':'var(--red)') + '">' + (netPl>=0?'+':'') + fmtMoney(netPl) + '</b></div>'
+      + '</div>';
+  }
+}
+
+function renderHistory(){
+  const settled = state.positions.filter(p=>p.status!=='open');
+  const filtered = settled.filter(p => state.historyFilter==='all' ? true : (state.historyFilter==='won'?p.status==='won':p.status==='lost'));
+  const sorted = [...filtered].sort((a,b) => b.expiryDay - a.expiryDay);
+  const wins = settled.filter(p=>p.status==='won').length, losses = settled.filter(p=>p.status==='lost').length;
+  const totalRealized = settled.reduce((sum,p)=>sum+(p.payoff-p.premium*p.qty),0);
+  const winRate = settled.length ? (wins/settled.length*100) : 0;
+
+  document.getElementById('historyStats').innerHTML =
+    '<div class="stat"><div class="label">CONTRACTS SETTLED</div><div class="value">' + settled.length + '</div></div>'
+    + '<div class="stat"><div class="label">WIN RATE</div><div class="value">' + winRate.toFixed(0) + '% <span style="font-size:12px;color:var(--text-dim)">(' + wins + 'W / ' + losses + 'L)</span></div></div>'
+    + '<div class="stat"><div class="label">TOTAL REALIZED P&amp;L</div><div class="value" style="color:' + (totalRealized>=0?'var(--phosphor)':'var(--red)') + '">' + (totalRealized>=0?'+':'') + fmtMoney(totalRealized) + '</div></div>';
+
+  const body = document.getElementById('historyBody');
+  if(sorted.length===0){ body.innerHTML = '<tr><td colspan="11" class="empty-state">No settled contracts' + (state.historyFilter!=='all'?' matching this filter':' yet') + '.</td></tr>'; return; }
+  body.innerHTML = sorted.map(pos => {
+    const netPl = pos.payoff - (pos.premium*pos.qty);
+    const kindLabel = pos.type==='swap'?'Swap':(pos.type==='put'?'Put':'Call');
+    const strikeCol = pos.type==='swap' ? ('deaths>=' + pos.threshold) : fmtMoney(pos.strike);
+    return '<tr>'
+      + '<td>' + kindLabel + '</td><td class="sym">' + escapeHtml(pos.symbol) + '</td><td>' + strikeCol + '</td>'
+      + '<td>Day ' + pos.boughtDay + '</td><td>Day ' + pos.expiryDay + '</td><td>' + fmtMoney(pos.settlePrice||0) + '</td>'
+      + '<td>' + pos.qty + '</td><td>' + fmtMoney(pos.premium*pos.qty) + '</td><td>' + fmtMoney(pos.payoff) + '</td>'
+      + '<td class="' + (netPl>=0?'win-text':'loss-text') + '">' + (netPl>=0?'+':'') + fmtMoney(netPl) + '</td>'
+      + '<td class="' + (pos.status==='won'?'win-text':'loss-text') + '">' + (pos.status==='won'?'WON':'LOST') + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function renderStats(){
+  document.getElementById('statCash').textContent = fmtMoney(state.cash);
+  const openVal = state.positions.filter(p=>p.status==='open').reduce((sum,pos) => {
+    if(pos.type==='swap') return sum;
+    const price = currentPrice(pos.symbol) || 0;
+    return sum + (pos.type==='put' ? Math.max(0,pos.strike-price) : Math.max(0,price-pos.strike)) * pos.qty;
+  }, 0);
+  document.getElementById('statOpenVal').textContent = fmtMoney(openVal);
+  const realizedEl = document.getElementById('statRealized');
+  realizedEl.textContent = (state.realized>=0?'+':'') + fmtMoney(state.realized);
+  realizedEl.className = 'value ' + (state.realized>0?'up':state.realized<0?'down':'');
+  document.getElementById('statNet').textContent = fmtMoney(state.cash + openVal);
+}
+
+function renderAll(){
+  renderTicker(); renderPremiumPreview(); renderPositions(); renderHistory(); renderStats(); renderChart();
+}
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => { if(e.target.files[0]) handleUpload(e.target.files[0]); fileInput.value=''; });
+['dragover','dragenter'].forEach(evt => dropzone.addEventListener(evt, e=>{e.preventDefault(); dropzone.classList.add('drag');}));
+['dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, e=>{e.preventDefault(); dropzone.classList.remove('drag');}));
+dropzone.addEventListener('drop', e => { if(e.dataTransfer.files[0]) handleUpload(e.dataTransfer.files[0]); });
+
+['wDamage','wHealing','wKills','wAssists','wDeaths'].forEach(id => {
+  const el = document.getElementById(id), valEl = document.getElementById(id+'Val');
+  el.addEventListener('input', () => {
+    valEl.textContent = el.value;
+    weights[id.slice(1).toLowerCase()] = el.value/100;
+    recomputeAllPrices(); checkAndSettlePositions(); renderAll();
+  });
+});
+weights.damage = document.getElementById('wDamage').value/100;
+weights.healing = document.getElementById('wHealing').value/100;
+weights.kills = document.getElementById('wKills').value/100;
+weights.assists = document.getElementById('wAssists').value/100;
+weights.deaths = document.getElementById('wDeaths').value/100;
+
+document.getElementById('optSymbol').addEventListener('change', () => { document.getElementById('optStrike').value=''; renderPremiumPreview(); });
+['optStrike','optExpiry','optQty','swapThreshold','swapNotional'].forEach(id => document.getElementById(id).addEventListener('input', renderPremiumPreview));
+
+const navFloor = document.getElementById('navFloor'), navHistory = document.getElementById('navHistory');
+const viewFloor = document.getElementById('viewTradingFloor'), viewHistory = document.getElementById('viewHistory');
+navFloor.addEventListener('click', () => { navFloor.classList.add('active'); navHistory.classList.remove('active'); viewFloor.classList.remove('hidden'); viewHistory.classList.add('hidden'); });
+navHistory.addEventListener('click', () => { navHistory.classList.add('active'); navFloor.classList.remove('active'); viewHistory.classList.remove('hidden'); viewFloor.classList.add('hidden'); renderHistory(); });
+document.getElementById('historyFilters').querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
+  state.historyFilter = btn.dataset.filter;
+  document.getElementById('historyFilters').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderHistory();
+}));
+</script>
+</body>
+</html>
