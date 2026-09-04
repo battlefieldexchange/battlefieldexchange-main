@@ -1,42 +1,2637 @@
 <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Battlefield Exchange</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  :root{
+    --bg: #0a0f0c;
+    --panel: #0f1712;
+    --panel-2: #131d17;
+    --line: #24352a;
+    --phosphor: #4dff9e;
+    --phosphor-dim: #2d8a5c;
+    --amber: #ffb84d;
+    --red: #ff5d5d;
+    --blue: #5db8ff;
+    --purple: #c792ea;
+    --text: #d7ecdf;
+    --text-dim: #7fa08c;
+    --mono: "IBM Plex Mono", "Courier New", monospace;
+    --sans: "Barlow Condensed", Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--mono);}
+  body{
+    background-image:
+      radial-gradient(ellipse at top, rgba(77,255,158,0.05), transparent 60%),
+      repeating-linear-gradient(180deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 3px);
+    min-height:100vh;
+    padding-bottom:60px;
+  }
+  ::selection{background:var(--phosphor-dim);color:#000;}
+  a{color:var(--phosphor);}
+  .hidden{display:none !important;}
+
+  .auth-wrap{ max-width:420px; margin:9vh auto 0; padding:0 20px; }
+  .auth-card{ background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:28px 26px; }
+  .auth-card h1{ font-family:var(--sans); color:var(--phosphor); font-size:28px; margin:0 0 4px; text-shadow:0 0 18px rgba(77,255,158,0.35); }
+  .auth-card .tagline{font-size:12px; color:var(--text-dim); margin-bottom:22px;}
+  .auth-tabs{display:flex; gap:6px; margin-bottom:18px;}
+  .auth-tabs button{ flex:1; font-family:var(--sans); font-weight:600; font-size:14px; background:var(--panel-2); border:1px solid var(--line); color:var(--text-dim); padding:8px; border-radius:2px; cursor:pointer; }
+  .auth-tabs button.active{color:var(--phosphor); border-color:var(--phosphor-dim);}
+  .auth-msg{font-size:12px; min-height:16px; margin-top:10px;}
+  .auth-msg.err{color:var(--red);}
+  .auth-msg.ok{color:var(--phosphor);}
+  .auth-loading{text-align:center; color:var(--text-dim); padding:60px 20px; font-size:13px;}
+
+  header.exchange-header{
+    border-bottom:1px solid var(--line); padding:22px 28px 18px; display:flex; justify-content:space-between;
+    align-items:flex-end; flex-wrap:wrap; gap:14px; background:linear-gradient(180deg, rgba(77,255,158,0.04), transparent);
+  }
+  .brand{display:flex;align-items:baseline;gap:14px;}
+  .brand h1{ font-family:var(--sans); font-weight:700; font-size:34px; letter-spacing:0.5px; margin:0; color:var(--phosphor); text-shadow:0 0 18px rgba(77,255,158,0.35); }
+  .brand .tick{ font-size:13px; color:var(--text-dim); border:1px solid var(--line); padding:3px 8px; border-radius:2px; }
+  .session-stats{display:flex;gap:22px;font-size:13px; align-items:flex-end;}
+  .session-stats .stat{text-align:right;}
+  .session-stats .stat .label{color:var(--text-dim);font-size:11px;}
+  .session-stats .stat .value{font-size:19px;color:var(--text);}
+  .session-stats .stat .value.up{color:var(--phosphor);}
+  .session-stats .stat .value.down{color:var(--red);}
+  .who{font-size:12px; color:var(--text-dim); text-align:right;}
+  .who b{color:var(--text);}
+  .who .admin-pill{color:var(--amber); border:1px solid var(--amber); border-radius:10px; padding:1px 7px; font-size:10px; margin-left:6px;}
+  .logout-btn{ font-family:var(--mono); font-size:11px; background:transparent; border:1px solid var(--line); color:var(--text-dim); padding:3px 9px; border-radius:2px; cursor:pointer; margin-top:4px; }
+  .logout-btn:hover{border-color:var(--red); color:var(--red);}
+
+  main{max-width:1280px;margin:0 auto;padding:22px 24px;}
+  .grid{display:grid;grid-template-columns:1.6fr 1fr;gap:20px;}
+  @media (max-width: 980px){ .grid{grid-template-columns:1fr;} }
+
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:3px;}
+  .panel-head{ padding:12px 16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+  .panel-head h2{font-family:var(--sans); font-size:18px; font-weight:600; margin:0; color:var(--text); letter-spacing:0.3px;}
+  .panel-head .sub{font-size:11px;color:var(--text-dim);}
+  .panel-body{padding:14px 16px;}
+
+  .dropzone{ border:1px dashed var(--line); border-radius:3px; padding:22px; text-align:center; color:var(--text-dim); font-size:13px; cursor:pointer; transition:border-color .15s, color .15s; }
+  .dropzone:hover, .dropzone.drag{border-color:var(--phosphor-dim); color:var(--text);}
+  .dropzone input{display:none;}
+  .dropzone .big{font-family:var(--sans); font-size:16px; color:var(--text); margin-bottom:4px;}
+
+  .report-log{margin-top:12px; font-size:12px; max-height:160px; overflow-y:auto;}
+  .report-log .row{display:flex; justify-content:space-between; gap:10px; padding:5px 0; border-bottom:1px solid var(--line); color:var(--text-dim);}
+  .report-log .row span:first-child{color:var(--text); flex-shrink:0;}
+  .report-log .row .del-report{ font-family:var(--mono); font-size:10px; background:transparent; border:1px solid var(--red); color:var(--red); padding:1px 7px; border-radius:2px; cursor:pointer; }
+  .report-log .row .del-report:hover{background:rgba(255,93,93,0.12);}
+  #dupeResults .del-report{ font-family:var(--mono); font-size:10px; background:transparent; border:1px solid var(--red); color:var(--red); padding:1px 7px; border-radius:2px; cursor:pointer; margin-left:8px; }
+  #dupeResults .del-report:hover{background:rgba(255,93,93,0.12);}
+  #dupeResults .dupe-group{ margin-bottom:8px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  #dupeResults .dupe-group div{ padding:2px 0; }
+
+  .weight-row{display:grid; grid-template-columns:110px 1fr 42px; align-items:center; gap:10px; margin-bottom:10px; font-size:12px;}
+  .weight-row label{color:var(--text-dim);}
+  .weight-row input[type=range]{accent-color:var(--phosphor-dim); width:100%;}
+  .weight-row .val{text-align:right; color:var(--phosphor);}
+  .weight-note{font-size:11px; color:var(--text-dim); margin-top:6px; line-height:1.5;}
+
+  table.ticker{width:100%; border-collapse:collapse; font-size:13px;}
+  table.ticker thead th{ text-align:left; font-family:var(--sans); font-weight:600; font-size:12px; color:var(--text-dim); border-bottom:1px solid var(--line); padding:6px 8px; position:sticky; top:0; background:var(--panel); }
+  table.ticker td{padding:7px 8px; border-bottom:1px solid rgba(36,53,42,0.6); vertical-align:middle;}
+  table.ticker tbody tr:hover{background:rgba(77,255,158,0.04);}
+  .sym{font-family:var(--sans); font-weight:600; letter-spacing:0.4px;}
+  .cls-pill{font-weight:600;}
+  .price{font-weight:600;}
+  .chg{font-size:11px;}
+  .chg.up{color:var(--phosphor);}
+  .chg.down{color:var(--red);}
+  .chg.flat{color:var(--text-dim);}
+  .spark{width:70px; height:24px; display:block;}
+  .buy-btn{ font-family:var(--mono); font-size:11px; background:transparent; border:1px solid var(--phosphor-dim); color:var(--phosphor); padding:4px 9px; border-radius:2px; cursor:pointer; }
+  .buy-btn:hover{background:rgba(77,255,158,0.12);}
+  .empty-state{color:var(--text-dim); font-size:13px; padding:30px 10px; text-align:center;}
+
+  .type-tabs{display:flex; gap:6px; margin-bottom:14px;}
+  .type-tabs button{ flex:1; font-family:var(--sans); font-weight:600; font-size:13px; background:var(--panel-2); border:1px solid var(--line); color:var(--text-dim); padding:8px 4px; border-radius:2px; cursor:pointer; }
+  .type-tabs button.active.call{color:var(--phosphor); border-color:var(--phosphor-dim);}
+  .type-tabs button.active.put{color:var(--red); border-color:var(--red);}
+  .type-tabs button.active.swap{color:var(--purple); border-color:var(--purple);}
+  .type-desc{font-size:11px; color:var(--text-dim); margin-bottom:14px; line-height:1.5; border-left:2px solid var(--line); padding-left:8px;}
+
+  .field{margin-bottom:12px;}
+  .field label{display:block; font-size:11px; color:var(--text-dim); margin-bottom:4px;}
+  .field select, .field input{ width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:7px 8px; font-family:var(--mono); font-size:13px; border-radius:2px; }
+  .field select:focus, .field input:focus{outline:none; border-color:var(--phosphor-dim);}
+  .premium-box{ background:var(--panel-2); border:1px solid var(--line); border-radius:3px; padding:12px; font-size:12px; margin:10px 0 14px; }
+  .premium-box .line{display:flex; justify-content:space-between; padding:2px 0; color:var(--text-dim);}
+  .premium-box .line b{color:var(--text); font-weight:600;}
+  .premium-box .total{border-top:1px solid var(--line); margin-top:6px; padding-top:6px;}
+  .primary-btn{ width:100%; background:var(--phosphor-dim); color:#03130a; border:none; font-family:var(--sans); font-weight:700; font-size:15px; padding:10px; border-radius:2px; cursor:pointer; letter-spacing:0.3px; }
+  .primary-btn:hover{background:var(--phosphor);}
+  .primary-btn:disabled{background:var(--line); color:var(--text-dim); cursor:not-allowed;}
+  .msg{font-size:12px; margin-top:8px; min-height:16px;}
+  .msg.err{color:var(--red);}
+  .msg.ok{color:var(--phosphor);}
+
+  .pos-card{border:1px solid var(--line); border-radius:3px; padding:10px 12px; margin-bottom:10px; font-size:12px;}
+  .pos-card .top{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; flex-wrap:wrap; gap:4px;}
+  .pos-card .top .sym{font-size:14px;}
+  .pos-card .detail{color:var(--text-dim); display:flex; justify-content:space-between;}
+  .pos-card .detail b{color:var(--text);}
+  .pos-card.settled-win{border-color:var(--phosphor-dim); background:rgba(77,255,158,0.05);}
+  .pos-card.settled-loss{border-color:var(--red); background:rgba(255,93,93,0.05);}
+  .pos-card .kind{font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px;}
+  .tag{font-size:10px; padding:1px 6px; border-radius:10px; border:1px solid currentColor;}
+  .tag.open{color:var(--amber);}
+  .tag.win{color:var(--phosphor);}
+  .tag.loss{color:var(--red);}
+
+  .chart-wrap{padding:14px 16px;}
+  .legend-pills{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
+  .legend-pills button{ font-family:var(--mono); font-size:11px; background:var(--panel-2); border:1px solid var(--line); color:var(--text-dim); padding:4px 9px; border-radius:12px; cursor:pointer; }
+  .legend-pills button.active{color:#03130a; font-weight:600;}
+
+  .debug-panel{border-color:#5d3a1a;}
+  .debug-panel .panel-head{background:rgba(255,184,77,0.06);}
+  .debug-panel .panel-head h2{color:var(--amber);}
+  .debug-grid{display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:8px;}
+  .debug-btn{ font-family:var(--mono); font-size:12px; background:var(--panel-2); border:1px solid #5d3a1a; color:var(--amber); padding:8px 10px; border-radius:2px; cursor:pointer; }
+  .debug-btn:hover{background:rgba(255,184,77,0.12);}
+  .debug-inline{display:flex; gap:6px; align-items:center;}
+  .debug-inline input{width:70px; background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:7px 8px; font-family:var(--mono); border-radius:2px;}
+  .dismiss-btn{ font-family:var(--mono); font-size:10px; background:transparent; border:1px solid var(--line); color:var(--text-dim); padding:2px 7px; border-radius:2px; cursor:pointer; margin-left:8px; }
+  .dismiss-btn:hover{border-color:var(--text); color:var(--text);}
+  .close-btn{ font-family:var(--mono); font-size:11px; background:transparent; border:1px solid var(--phosphor-dim); color:var(--phosphor); padding:4px 10px; border-radius:2px; cursor:pointer; }
+  .close-btn:hover{background:rgba(77,255,158,0.12);}
+
+  .subnav{max-width:1280px; margin:0 auto; padding:14px 24px 0; display:flex; gap:8px; border-bottom:1px solid var(--line);}
+  .subnav button{ font-family:var(--sans); font-size:15px; font-weight:600; background:transparent; border:none; color:var(--text-dim); padding:8px 4px 12px; cursor:pointer; border-bottom:2px solid transparent; margin-right:14px; }
+  .subnav button.active{color:var(--phosphor); border-bottom-color:var(--phosphor);}
+  .subnav button:hover{color:var(--text);}
+
+  .admin-note{ font-size:11px; color:var(--text-dim); border:1px solid var(--line); border-radius:3px; padding:8px 10px; margin-bottom:12px; line-height:1.5; }
+  .uid-box{ font-size:11px; color:var(--text-dim); border:1px solid var(--line); border-radius:3px; padding:8px 10px; margin-bottom:12px; word-break:break-all; }
+  .uid-box b{color:var(--phosphor); user-select:all;}
+
+  table.history{width:100%; border-collapse:collapse; font-size:13px;}
+  table.history thead th{ text-align:left; font-family:var(--sans); font-weight:600; font-size:12px; color:var(--text-dim); border-bottom:1px solid var(--line); padding:8px; }
+  table.history td{padding:8px; border-bottom:1px solid rgba(36,53,42,0.6);}
+  table.history tr:hover{background:rgba(77,255,158,0.04);}
+  .win-text{color:var(--phosphor);}
+  .loss-text{color:var(--red);}
+  .filter-pills{display:flex; gap:6px; margin-bottom:14px;}
+  .filter-pills button{ font-family:var(--mono); font-size:12px; background:var(--panel-2); border:1px solid var(--line); color:var(--text-dim); padding:5px 12px; border-radius:12px; cursor:pointer; }
+  .filter-pills button.active{color:#03130a; background:var(--phosphor); border-color:var(--phosphor); font-weight:600;}
+  .history-stats{display:flex; gap:24px; margin-bottom:16px; flex-wrap:wrap;}
+  .history-stats .stat{font-size:13px;}
+  .history-stats .stat .label{color:var(--text-dim); font-size:11px;}
+  .history-stats .stat .value{font-size:20px;}
+
+  .elo-summary{display:flex; gap:24px; margin-bottom:16px; flex-wrap:wrap;}
+  .elo-summary .stat{font-size:13px;}
+  .elo-summary .stat .label{color:var(--text-dim); font-size:11px;}
+  .elo-summary .stat .value{font-size:18px;}
+  .elo-pos{color:var(--phosphor);}
+  .elo-neg{color:var(--red);}
+  .player-link{cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;}
+  .player-link:hover{color:var(--phosphor);}
+  .class-expand-row td{padding:0; border-bottom:1px solid var(--line);}
+  .class-expand{background:var(--panel-2); border-left:2px solid var(--phosphor-dim); padding:12px 16px; margin:2px 0;}
+  .class-expand-meta{color:var(--text-dim); font-size:12px; margin-bottom:8px;}
+  .class-row{display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line); font-size:13px;}
+  .class-row:last-child{border-bottom:none;}
+  .class-row .count{color:var(--text-dim); font-size:12px;}
+
+  ::-webkit-scrollbar{width:8px; height:8px;}
+  ::-webkit-scrollbar-track{background:var(--panel);}
+  ::-webkit-scrollbar-thumb{background:var(--line); border-radius:4px;}
+
+  .image-converter{margin-top:14px;}
+  .image-dropzone{border:1px dashed var(--line);border-radius:3px;padding:18px;text-align:center;color:var(--text-dim);font-size:13px;cursor:pointer;transition:border-color .15s,color .15s;}
+  .image-dropzone:hover,.image-dropzone.drag{border-color:var(--phosphor-dim);color:var(--text);}
+  .image-dropzone input{display:none;}
+  .image-dropzone .big{font-family:var(--sans);font-size:16px;color:var(--text);margin-bottom:4px;}
+  .ocr-status{font-size:11px;color:var(--text-dim);margin-top:10px;min-height:16px;line-height:1.5;}
+  .ocr-status.ok{color:var(--phosphor);}
+  .ocr-status.err{color:var(--red);}
+  .ocr-progress{height:3px;background:var(--line);margin-top:7px;border-radius:2px;overflow:hidden;display:none;}
+  .ocr-progress > div{height:100%;width:0;background:var(--phosphor-dim);transition:width .15s;}
+  .ocr-actions{display:flex;gap:7px;margin-top:10px;}
+  .ocr-actions button{flex:1;font-family:var(--mono);font-size:11px;background:transparent;border:1px solid var(--line);color:var(--text-dim);padding:6px 9px;border-radius:2px;cursor:pointer;}
+  .ocr-actions button:hover{border-color:var(--phosphor-dim);color:var(--phosphor);}
+  .ocr-actions button:disabled{opacity:.45;cursor:not-allowed;}
+
+</style>
+</head>
+<body>
+
+<div id="authScreen" class="auth-wrap">
+  <div class="auth-card">
+    <h1>BATTLEFIELD EXCHANGE</h1>
+    <div class="tagline">Sign in to trade. Each account gets its own cash and positions on a shared market.</div>
+    <div class="auth-tabs">
+      <button id="tabSignIn" class="active">Sign In</button>
+      <button id="tabSignUp">Create Account</button>
+    </div>
+    <div class="field"><label>Username</label><input type="text" id="authUsername" autocomplete="username" maxlength="20" placeholder="letters, numbers, underscore"></div>
+    <div class="field"><label>Password</label><input type="password" id="authPassword" autocomplete="current-password"></div>
+    <button class="primary-btn" id="authSubmit">Sign In</button>
+    <div class="auth-msg" id="authMsg"></div>
+  </div>
+</div>
+
+<div id="loadingScreen" class="auth-loading hidden">Connecting to exchange…</div>
+
+<div id="appRoot" class="hidden">
+
+<header class="exchange-header">
+  <div class="brand">
+    <h1>BATTLEFIELD EXCHANGE</h1>
+    <span class="tick" id="dayTick">DAY 0 — AWAITING FIRST REPORT</span>
+  </div>
+  <div class="session-stats">
+    <div class="stat"><div class="label">CASH</div><div class="value" id="statCash">$10,000.00</div></div>
+    <div class="stat"><div class="label">OPEN VALUE</div><div class="value" id="statOpenVal">$0.00</div></div>
+    <div class="stat"><div class="label">REALIZED P&amp;L</div><div class="value" id="statRealized">$0.00</div></div>
+    <div class="stat"><div class="label">NET WORTH</div><div class="value" id="statNet">$10,000.00</div></div>
+    <div class="who">
+      <div><b id="whoUsername"></b><span class="admin-pill hidden" id="adminPill">ADMIN</span></div>
+      <button class="logout-btn" id="logoutBtn">Sign out</button>
+    </div>
+  </div>
+</header>
+
+<nav class="subnav">
+  <button id="navFloor" class="active">Trading Floor</button>
+  <button id="navAssets">Assets</button>
+  <button id="navHistory">Trade History</button>
+  <button id="navElo">Elo Distribution</button>
+  <button id="navNetworth">Net Worth</button>
+</nav>
+
+<main>
+  <div id="viewTradingFloor">
+  <div class="grid">
+    <div style="display:flex; flex-direction:column; gap:20px;">
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Battle Reports</h2>
+          <span class="sub">upload a BATTLEFIELD_OVER.html — the market updates for everyone instantly</span>
+        </div>
+        <div class="panel-body">
+          <div class="dropzone" id="dropzone">
+            <div class="big">Drop one or more battle report .html files here</div>
+            <div>or click to browse — select one or more files; each file is checked before it's accepted</div>
+            <input type="file" id="fileInput" accept=".html,.htm" multiple>
+          </div>
+          <div class="report-log" id="reportLog"></div>
+
+          <section class="panel image-converter">
+            <div class="panel-head">
+              <h2>Image → Battle Report HTML</h2>
+              <span class="sub">OCR converts a battle-report screenshot into the standard report format</span>
+            </div>
+            <div class="panel-body">
+              <div class="image-dropzone" id="imageDropzone">
+                <div class="big">Drop a battle report image here</div>
+                <div>or click to browse — PNG, JPG, JPEG, WEBP and other browser-readable images</div>
+                <input type="file" id="imageInput" accept="image/*">
+              </div>
+              <div class="ocr-progress" id="ocrProgress"><div id="ocrProgressBar"></div></div>
+              <div class="ocr-status" id="ocrStatus"></div>
+              <div class="ocr-actions">
+                <button id="downloadConvertedHtml" disabled>Download converted .html</button>
+                <button id="uploadConvertedHtml" disabled>Upload converted report</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="panel debug-panel hidden" id="debugPanel">
+        <div class="panel-head">
+          <h2>Admin / Debug Console</h2>
+          <span class="sub">visible to admins only — enforced server-side, not just hidden UI</span>
+        </div>
+        <div class="panel-body">
+          <div class="admin-note">This panel is hidden client-side, but the real protection is Firestore Security Rules: even if someone forced it visible, the server rejects synthetic reports, day jumps, and report deletes from non-admin accounts.</div>
+          <div class="debug-grid">
+            <button class="debug-btn" id="dbgTestReport">Generate test report (random stats)</button>
+            <button class="debug-btn" id="dbgAdvanceDay">Advance clock +1 (no new data)</button>
+          </div>
+          <div class="debug-inline" style="margin-top:10px;">
+            <span style="font-size:12px; color:var(--text-dim);">Jump clock to day</span>
+            <input type="number" id="dbgJumpDay" min="0" step="1">
+            <button class="debug-btn" id="dbgJumpBtn">Go</button>
+          </div>
+          <div class="admin-note" style="margin-top:16px;">Price scale — changing these and hitting Recalculate reprices every stock for <b>every connected trader</b> immediately. Stock price is a direct read of each player's current Elo <b>rank</b> that day (see the Elo Distribution tab) — no day-over-day compounding, no separate weight set to tune. The middle-ranked player prices at "Median"; the single top-ranked player's price approaches (but never quite reaches) "Top price" as more players are tracked. Because this is rank-based, not raw-Elo-based, it can't blow up no matter how large the actual Elo gap between players gets. Only visible/editable here, admin-only server-side too.</div>
+          <div class="weight-row"><label>Median price</label><input type="number" step="1" id="pMedian" style="width:100%"><span></span></div>
+          <div class="weight-row"><label>Top price</label><input type="number" step="1" id="pTop" style="width:100%"><span></span></div>
+          <button class="debug-btn" id="dbgRecalc">Recalculate &amp; broadcast to all clients</button>
+          <div class="msg" id="wMsg"></div>
+          <div class="debug-inline" style="margin-top:10px;">
+            <button class="debug-btn" id="dbgFindDupes">Scan existing reports for duplicate stats</button>
+            <button class="debug-btn" id="dbgMigrateReports">Clean up duplicates &amp; lock in IDs</button>
+          </div>
+          <div id="dupeResults" style="margin-top:10px; font-size:12px; color:var(--text-dim); white-space:pre-line;"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Ticker</h2><span class="sub" id="tickerSub">no stocks listed yet</span></div>
+        <div class="panel-body" style="padding:0;">
+          <div style="padding:10px 16px; font-size:11px; color:var(--text-dim); border-bottom:1px solid var(--line); line-height:1.5;">Price tracks each player's current Elo standing against the whole field — no day-over-day compounding. The median player prices around the "Median" setting; the strongest currently trend toward the "Top price" setting. Same curve for every trader.</div>
+          <div class="field" style="margin:0; padding:10px 16px; border-bottom:1px solid var(--line);"><input type="text" id="tickerSearch" placeholder="Search symbol or class…" autocomplete="off"></div>
+          <div style="max-height:520px; overflow-y:auto;">
+            <table class="ticker">
+              <thead><tr><th>Symbol</th><th>Class</th><th>Price</th><th>Chg</th><th>Vol</th><th>Trend</th><th></th></tr></thead>
+              <tbody id="tickerBody"><tr><td colspan="7" class="empty-state">Upload a battle report to list the first stocks.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:20px;">
+
+      <section class="panel">
+        <div class="panel-head"><h2>Trade</h2><span class="sub">calls, puts &amp; elimination swaps</span></div>
+        <div class="panel-body">
+          <div class="type-tabs">
+            <button class="active call" data-type="call">Call</button>
+            <button class="put" data-type="put">Put</button>
+            <button class="swap" data-type="swap">Elim. Swap</button>
+          </div>
+          <div class="type-desc" id="typeDesc"></div>
+
+          <div class="field"><label>Underlying stock</label><select id="optSymbol"><option value="">— select a stock —</option></select></div>
+
+          <div id="fieldsCallPut">
+            <div class="field">
+              <label>Strike price</label>
+              <select id="optStrikeSelect"><option value="">— select a stock first —</option></select>
+            </div>
+            <div class="field hidden" id="optStrikeCustomField">
+              <label>Custom strike ($)</label>
+              <input type="number" id="optStrikeCustom" step="0.01" min="0.01">
+            </div>
+            <input type="hidden" id="optStrike">
+          </div>
+          <div id="fieldsSwap" class="hidden">
+            <div class="field"><label>Trigger: Deaths ≥</label><input type="number" id="swapThreshold" min="1" step="1" value="5"></div>
+            <div class="field"><label>Notional payout if triggered ($)</label><input type="number" id="swapNotional" min="1" step="1" value="500"></div>
+          </div>
+
+          <div class="field"><label>Expires in (future reports)</label><input type="number" id="optExpiry" min="1" step="1" value="2"></div>
+          <div class="field"><label>Contracts</label><input type="number" id="optQty" min="1" step="1" value="1"></div>
+
+          <div class="premium-box" id="premiumBox">
+            <div class="line" id="rowCurrent"><span>Current price</span><b id="pbCurrent">—</b></div>
+            <div class="line" id="rowIntrinsic"><span>Intrinsic value</span><b id="pbIntrinsic">—</b></div>
+            <div class="line" id="rowProb" style="display:none;"><span>Est. trigger probability</span><b id="pbProb">—</b></div>
+            <div class="line"><span id="timeValueLabel">Time value (volatility-based)</span><b id="pbTime">—</b></div>
+            <div class="line total"><span>Premium / contract</span><b id="pbPremium">—</b></div>
+            <div class="line"><span>Total cost</span><b id="pbTotal">—</b></div>
+          </div>
+          <button class="primary-btn" id="buyBtn" disabled>Select a stock first</button>
+          <div class="msg" id="buyMsg"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Positions</h2><span class="sub" id="posSub">0 derivatives · 0 shares</span></div>
+        <div class="panel-body" id="positionsBody"><div class="empty-state">No contracts yet.</div></div>
+      </section>
+
+    </div>
+  </div>
+
+  <section class="panel" style="margin-top:20px;">
+    <div class="panel-head"><h2>Price History</h2><span class="sub">select symbols below to plot</span></div>
+    <div class="chart-wrap">
+      <div class="legend-pills" id="legendPills"></div>
+      <canvas id="priceChart" height="110"></canvas>
+    </div>
+  </section>
+  </div>
+
+  <div id="viewAssets" class="hidden">
+    <section class="panel">
+      <div class="panel-head"><h2>Assets</h2><span class="sub">buy and sell player stock</span></div>
+      <div class="panel-body">
+        <div class="grid" style="grid-template-columns:1fr 1.4fr; gap:20px;">
+          <div>
+            <div class="type-desc" style="margin-bottom:12px;">Player stock is a cash equity position. Buy at the current market price, hold it through future reports, and sell whenever you choose. Your unrealized value uses the latest player price.</div>
+            <div class="field"><label>Player stock</label><select id="assetSymbol"><option value="">— select a stock —</option></select></div>
+            <div class="field"><label>Shares</label><input type="number" id="assetQty" min="1" step="1" value="1"></div>
+            <div class="premium-box" id="assetPreview">
+              <div class="line"><span>Current price</span><b id="assetCurrent">—</b></div>
+              <div class="line"><span>Shares</span><b id="assetShares">—</b></div>
+              <div class="line total"><span>Total cost</span><b id="assetTotal">—</b></div>
+            </div>
+            <button class="primary-btn" id="assetBuyBtn" disabled>Select a stock first</button>
+            <div class="msg" id="assetMsg"></div>
+          </div>
+          <div>
+            <div class="panel-head" style="margin:-14px -16px 14px;"><h2>Your Holdings</h2><span class="sub" id="assetSub">0 shares</span></div>
+            <div id="assetsBody"><div class="empty-state">No stock holdings yet.</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="viewHistory" class="hidden">
+    <section class="panel">
+      <div class="panel-head"><h2>Trade History</h2><span class="sub">every derivative trade you've settled or closed</span></div>
+      <div class="panel-body">
+        <div class="history-stats" id="historyStats"></div>
+        <div class="filter-pills" id="historyFilters">
+          <button data-filter="all" class="active">All</button>
+          <button data-filter="won">Won</button>
+          <button data-filter="lost">Lost</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="history">
+            <thead><tr><th>Type</th><th>Symbol</th><th>Strike/Trigger</th><th>Bought</th><th>Expiry</th><th>Settled</th><th>Contracts</th><th>Premium</th><th>Payoff</th><th>Net P&amp;L</th><th>Result</th></tr></thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="viewElo" class="hidden">
+    <section class="panel">
+      <div class="panel-head"><h2>Elo Distribution</h2><span class="sub">faction win/loss, scaled by role-relative performance across every battle report</span></div>
+      <div class="panel-body">
+        <div class="elo-summary" id="eloSummary"></div>
+        <div class="chart-wrap" style="padding:0 0 18px;">
+          <canvas id="eloChart" height="130"></canvas>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="history">
+            <thead><tr><th>Rank</th><th>Player</th><th>Class</th><th>Elo</th><th>W-L-D</th><th>Battles</th></tr></thead>
+            <tbody id="eloBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="viewNetworth" class="hidden">
+    <section class="panel">
+      <div class="panel-head"><h2>Net Worth</h2><span class="sub">every trader who has signed up, ranked by true net worth</span></div>
+      <div class="panel-body">
+        <div class="admin-note">Open Value here is every trader's open stock/option/swap positions priced at the current market price — the same math your own header stat uses. Firestore's rules were updated so any signed-in trader can read (not write) any other trader's positions, which is what makes this possible; trade activity is now visible market-wide, not just to each account's owner.</div>
+        <div class="elo-summary" id="networthSummary"></div>
+        <div style="overflow-x:auto;">
+          <table class="history">
+            <thead><tr><th>Rank</th><th>Trader</th><th>Cash</th><th>Open Value</th><th>Net Worth</th><th>Realized P&amp;L</th></tr></thead>
+            <tbody id="networthBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
+  signInWithEmailAndPassword, signOut
+} from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
+import {
+  getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
+  collection, addDoc, onSnapshot, query, orderBy, where, getCountFromServer,
+  runTransaction, serverTimestamp, writeBatch
+} from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
+
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAXn_FKCuNZFImAdPt9y6gPTeWHSxuzOos",
+  authDomain: "battlefieldexchange-85f14.firebaseapp.com",
+  projectId: "battlefieldexchange-85f14",
+  storageBucket: "battlefieldexchange-85f14.firebasestorage.app",
+  messagingSenderId: "802549348290",
+  appId: "1:802549348290:web:562dee7a3a13eeca49c85b"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const state = {
+  uid: null, username: null, isAdmin: false,
+  reports: [], day: 0, players: {}, elo: {},
+  cash: 10000, realized: 0, positions: [],
+  selectedSymbols: new Set(), tradeType: 'call', historyFilter: 'all', assetSymbol: '', tickerSearch: ''
+};
+// Admin-tunable Elo weights (unchanged, unaffected by anything below).
+const ELO_START = 1500, ELO_K = 32;
+// Elo/MMR is a completely separate ladder from the stock market — its own
+// weights, its own constant, never touched by the admin's price panel.
+// Same underlying scoring machinery (role-relative z-scores, clamped — see
+// weightedComposite below) as before, but tuning one never moves the other.
+//
+// TWO weight buckets, not one shared set. A Medic's job is healing/assists/
+// survival, not damage — scoring a Medic's damage z-score against the same
+// weight a DPS class gets meant a Medic who healed hard but had an
+// unremarkable damage number (normal for the role) still got dragged down
+// by it as hard as a DPS class having a bad damage game. The per-report
+// baseline above (roleStatsLookup/buildStatLookups) already answers "what's
+// good damage FOR a Medic" correctly — that part was never broken. What was
+// missing was "how much should that stat matter to a Medic's score AT ALL"
+// — that's what these two weight sets fix.
+//
+// Medic: healing is the primary stat. Assists and deaths matter a lot too
+// (deaths still subtract, same as everyone). Damage still counts — an
+// outlier-damage Medic game should get credit — but as a secondary stat,
+// not a primary one. Kills are essentially never a Medic's job, so they
+// barely register.
+const MEDIC_WEIGHTS = { damage: 0.15, healing: 0.45, kills: 0.00, assists: 0.20, deaths: 0.20 };
+// Everyone else (DPS bucket — Commando, Bounty Hunter, Smuggler, Officer,
+// unknown/unlisted classes): damage, deaths, and assists are the real
+// signal. Kills barely matter — a kill is often just who landed the last
+// hit, noisy and not a reliable performance signal on its own. Healing
+// counts for NOTHING — not their job, so it can't help or hurt them.
+const DPS_WEIGHTS = { damage: 0.35, healing: 0.00, kills: 0.05, assists: 0.25, deaths: 0.35 };
+// Picks the right bucket for a given report row's own class that game (see
+// weightedComposite call below — always keyed off r.profession, never off
+// a player's "current"/last-known class, same as the role baseline is).
+function eloWeightsFor(profession){
+  return normProf(profession) === 'medic' ? MEDIC_WEIGHTS : DPS_WEIGHTS;
+}
+
+// TEAM RESULT (win/loss) — new feature. Every report's players are split by
+// faction and the two sides are scored against each other; that "did my
+// faction win this battle" result — not raw individual stats — is now the
+// PRIMARY driver of Elo. Individual performance (weightedComposite above)
+// becomes a bounded MODIFIER on top of the team result instead of the only
+// signal, which is what actually fixes "medics don't deal much damage":
+// medics were never supposed to be judged on raw damage, but under the old
+// all-vs-all system a quiet game could still drag a medic's Elo down even
+// when their side won the fight outright.
+//
+// Determining the winner: DEATHS ONLY. Whichever faction took fewer total
+// deaths that report wins it. Nothing else (kills, assists, damage) factors
+// into which side is declared the winner — those still matter, just as
+// individual performance via weightedComposite/performanceMultiplier below.
+function teamCombatScore(rows){
+  let deaths = 0;
+  rows.forEach(r => { deaths += r.deaths || 0; });
+  return -deaths; // negated so "higher score" still means "did better" below
+}
+// Faction labels can vary between exports (Imperial/Blue, Rebel/Red) but
+// always mean the same two sides of this game's conflict. Normalize to a
+// canonical side name so team grouping and win/loss stay consistent no
+// matter which label a given report happened to use. Anything not in this
+// list is left as-is (trimmed), so unrecognized/future factions still group
+// correctly by their own name — they just aren't merged with Imperial/Rebel.
+const FACTION_ALIASES = {
+  imperial: 'Imperial', blue: 'Imperial',
+  rebel: 'Rebel', red: 'Rebel',
+};
+function normalizeFactionSide(faction){
+  const key = String(faction || '').trim().toLowerCase();
+  return FACTION_ALIASES[key] || (String(faction || 'Unknown').trim() || 'Unknown');
+}
+// Groups a report's rows by (normalized) faction. Reports that don't split
+// cleanly into two sides (missing faction data, more than two sides,
+// free-for-all) fall back to the old all-vs-all individual Elo below, since
+// there's no clean "team" to score.
+function factionGroups(rows){
+  const byFaction = {};
+  rows.forEach(r => {
+    const key = normalizeFactionSide(r.faction);
+    (byFaction[key] = byFaction[key] || []).push(r);
+  });
+  return byFaction;
+}
+// The team-result delta is a standard 2-team Elo update (K=TEAM_ELO_K),
+// applied once per report, not once per opponent. The performance multiplier
+// then rescales it by PERFORMANCE_INFLUENCE around 1.0 (so 0.4 ->
+// 0.6x-1.4x), built from the SAME clamped composite the price model uses.
+// Bounded on both ends on purpose: after the stock-price z-score formula
+// blew up into unbounded prices for outlier players, every new formula in
+// this file is built to have a hard ceiling/floor no matter how extreme the
+// input gets. A multiplier can dampen or boost a result, but it can never
+// flip a win into an Elo loss or vice versa, and it can never runaway.
+const TEAM_ELO_K = 32;
+const PERFORMANCE_INFLUENCE = 0.4;
+function performanceMultiplier(compositeZ){
+  const clamped = Math.max(-Z_CLAMP, Math.min(Z_CLAMP, compositeZ));
+  return 1 + PERFORMANCE_INFLUENCE * (clamped / Z_CLAMP);
+}
+// MARGIN OF VICTORY — a nail-biter and a total stomp both used to move Elo by
+// the same base amount, as long as the winner came out ahead at all. Real
+// battles aren't binary like that: dying 11 times while the other side dies
+// 40 says a lot more about the gap between two sides than an 11-9 death
+// count does, so the team result should be free to swing further when the
+// battle was actually lopsided. Bounded the same way as everything else in
+// this file: the multiplier can only ever scale a result UP from the plain
+// win/loss baseline (1x), by at most MOV_INFLUENCE, so an ordinary close
+// fight is completely unaffected and nothing can runaway regardless of how
+// extreme the death gap gets. Margin is measured as a fraction of the total
+// deaths in the battle so it's relative to the size of the fight, not an
+// absolute death count that means different things in an 8-player skirmish
+// vs a 40-player siege.
+const MOV_INFLUENCE = 0.5;
+function teamCombatVolume(rows){
+  let deaths = 0;
+  rows.forEach(r => { deaths += r.deaths || 0; });
+  return deaths;
+}
+function marginMultiplier(scoreA, scoreB, rowsA, rowsB){
+  const totalDeaths = teamCombatVolume(rowsA) + teamCombatVolume(rowsB);
+  if(totalDeaths <= 0) return 1;
+  const marginRatio = Math.min(1, Math.abs(scoreA - scoreB) / totalDeaths);
+  return 1 + MOV_INFLUENCE * marginRatio;
+}
+
+// STOCK PRICE MODEL — driven purely by each player's current RANK in the
+// Elo standings that day. No history, no compounding: a price on any given
+// day is a pure function of (that player's rank among everyone that day) —
+// nothing here ever reads yesterday's price.
+//
+// This is deliberately RANK-based, not z-score-based. An earlier version
+// used (playerElo - meanElo) / stdElo directly, which blew up badly: real
+// Elo tails turned out to be far longer than a normal-ish distribution
+// would suggest (a genuinely dominant player who wins nearly every
+// head-to-head across hundreds of games can end up 5-7+ population std
+// devs out, not the ~3 assumed), and since that formula was a pure
+// exponential of z with no bound, several players independently landing
+// out past z=5 each produced prices in the tens of millions simultaneously.
+// Percentile rank fixes this structurally rather than by tuning constants:
+// percentile is mathematically confined to (0,1) no matter how extreme the
+// underlying Elo gap is, so the curve below can get arbitrarily close to
+// "top" for the single best player but can never exceed it, regardless of
+// whether that player's Elo edge is small or enormous.
+//   percentile = 1 - rank / (N + 1)   (N = players currently tracked;
+//                                       strictly between 0 and 1)
+//   price = median * (top/median) ^ (2 * (percentile - 0.5))
+// At percentile 0.5 (the middle of the pack) price == median. As
+// percentile -> 1 (the very best, in a large enough population) price
+// approaches — but never quite reaches — top. Ordering still always
+// matches Elo ordering exactly, same guarantee as before.
+const DEFAULT_PRICE_SCALE = { median: 100, top: 100000 };
+let PRICE_SCALE_SETTINGS = { ...DEFAULT_PRICE_SCALE };
+function priceFromPercentile(percentile){
+  const ratio = PRICE_SCALE_SETTINGS.top / PRICE_SCALE_SETTINGS.median;
+  const price = PRICE_SCALE_SETTINGS.median * Math.pow(ratio, 2 * (percentile - 0.5));
+  return Math.round(price * 100) / 100;
+}
+// Ranks every currently-known player by Elo (best first) and returns a
+// name -> price map for that snapshot. Rank-based, so it only cares about
+// ORDER, never about how large the raw Elo gaps between players happen to be.
+function pricesFromEloSnapshot(ratings, allNames){
+  const sorted = [...allNames].sort((a,b) => ratings[b].elo - ratings[a].elo);
+  const N = sorted.length;
+  const prices = {};
+  sorted.forEach((name, i) => {
+    const rank = i + 1; // 1 = best
+    const percentile = 1 - rank / (N + 1);
+    prices[name] = priceFromPercentile(percentile);
+  });
+  return prices;
+}
+// Below this many same-profession peers in a single report, that profession's
+// own mean/std is too noisy to trust (e.g. a lone medic in a 40-player field)
+// — fall back to scoring against the whole field for that stat instead. 2 is
+// the floor: a standard 8v8 fields 2 medics per side, so most reports clear
+// this and get a real medic-vs-medic baseline instead of the field-wide one.
+const MIN_ROLE_SAMPLE = 2;
+// Cap any single stat's z-score contribution before weighting. Keeps one
+// freak report (a chain-death zerg wipe, a lucky 10-kill spree) from
+// swamping everything else in the composite.
+const Z_CLAMP = 2.5;
+let unsubReports = null, unsubPositions = null, unsubUserDoc = null, unsubWeights = null, unsubDayCounter = null;
+let reportsRecheckTimer = null;
+let pendingUsername = null;
+
+// Firebase Auth only understands email/phone/OAuth identities, not "usernames" —
+// so we generate a private, never-shown fake email from the username and use that
+// everywhere under the hood. Firebase's own one-account-per-email rule means two
+// people can't grab the same username: the second signup just fails naturally.
+function usernameToAuthEmail(username){
+  return username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') + '@players.battlefield-exchange.local';
+}
+function isValidUsername(username){
+  return /^[A-Za-z0-9_]{3,20}$/.test(username.trim());
+}
+
+const authScreen = document.getElementById('authScreen');
+const loadingScreen = document.getElementById('loadingScreen');
+const appRoot = document.getElementById('appRoot');
+let authMode = 'signin';
+
+document.getElementById('tabSignIn').addEventListener('click', () => setAuthMode('signin'));
+document.getElementById('tabSignUp').addEventListener('click', () => setAuthMode('signup'));
+function setAuthMode(mode){
+  authMode = mode;
+  document.getElementById('tabSignIn').classList.toggle('active', mode==='signin');
+  document.getElementById('tabSignUp').classList.toggle('active', mode==='signup');
+  document.getElementById('authSubmit').textContent = mode==='signin' ? 'Sign In' : 'Create Account';
+  document.getElementById('authMsg').textContent = '';
+}
+
+document.getElementById('authSubmit').addEventListener('click', async () => {
+  const username = document.getElementById('authUsername').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const msg = document.getElementById('authMsg');
+  msg.className = 'auth-msg'; msg.textContent = '';
+  if(!username || !password){ msg.className='auth-msg err'; msg.textContent='Enter a username and password.'; return; }
+  if(!isValidUsername(username)){ msg.className='auth-msg err'; msg.textContent='Username must be 3-20 characters: letters, numbers, underscore only.'; return; }
+  const authEmail = usernameToAuthEmail(username);
+  try{
+    if(authMode === 'signin') await signInWithEmailAndPassword(auth, authEmail, password);
+    else {
+      pendingUsername = username;
+      await createUserWithEmailAndPassword(auth, authEmail, password);
+    }
+  }catch(err){
+    pendingUsername = null;
+    msg.className = 'auth-msg err';
+    msg.textContent = friendlyAuthError(err);
+  }
+});
+function friendlyAuthError(err){
+  const code = err.code || '';
+  if(code.includes('auth/email-already-in-use')) return 'That username is already taken — try signing in instead.';
+  if(code.includes('auth/invalid-credential') || code.includes('auth/wrong-password')) return 'Wrong username or password.';
+  if(code.includes('auth/weak-password')) return 'Password should be at least 6 characters.';
+  if(code.includes('auth/invalid-email')) return 'That username has characters Firebase can\'t accept — stick to letters, numbers, and underscores.';
+  if(code.includes('auth/unauthorized-domain')) return "This domain isn't authorized in Firebase yet — add it under Authentication -> Settings -> Authorized domains.";
+  return err.message || 'Something went wrong.';
+}
+
+document.getElementById('logoutBtn').addEventListener('click', () => signOut(auth));
+
+onAuthStateChanged(auth, async (user) => {
+  teardownSubscriptions();
+  if(!user){
+    appRoot.classList.add('hidden');
+    loadingScreen.classList.add('hidden');
+    authScreen.classList.remove('hidden');
+    return;
+  }
+  authScreen.classList.add('hidden');
+  loadingScreen.classList.remove('hidden');
+
+  state.uid = user.uid;
+
+  const userRef = doc(db, 'users', user.uid);
+  const snap = await getDoc(userRef);
+  if(!snap.exists()){
+    const username = pendingUsername || user.email.split('@')[0];
+    await setDoc(userRef, { username, cash: 10000, realized: 0, createdAt: serverTimestamp() });
+    state.username = username;
+  } else {
+    state.username = snap.data().username || user.email.split('@')[0];
+  }
+  pendingUsername = null;
+  document.getElementById('whoUsername').textContent = state.username;
+
+  try{
+    const adminSnap = await getDoc(doc(db, 'admins', user.uid));
+    state.isAdmin = adminSnap.exists();
+  }catch(e){ state.isAdmin = false; }
+  document.getElementById('debugPanel').classList.toggle('hidden', !state.isAdmin);
+  document.getElementById('adminPill').classList.toggle('hidden', !state.isAdmin);
+  if(state.isAdmin) addUidBoxIfMissing(user.uid);
+
+  subscribeToMarket();
+  subscribeToUserDoc(userRef);
+  subscribeToPositions(user.uid);
+  subscribeToPriceWeights();
+  subscribeToDayCounter();
+
+  loadingScreen.classList.add('hidden');
+  appRoot.classList.remove('hidden');
+});
+
+function teardownSubscriptions(){
+  if(unsubReports){ unsubReports(); unsubReports = null; }
+  if(unsubUserDoc){ unsubUserDoc(); unsubUserDoc = null; }
+  if(unsubPositions){ unsubPositions(); unsubPositions = null; }
+  if(unsubWeights){ unsubWeights(); unsubWeights = null; }
+  if(unsubDayCounter){ unsubDayCounter(); unsubDayCounter = null; }
+  if(reportsRecheckTimer){ clearInterval(reportsRecheckTimer); reportsRecheckTimer = null; }
+}
+// The "day" counter (settings doc counters/day) only used to get picked up
+// by other clients indirectly, whenever the next report happened to land —
+// so an admin's Advance Day / Jump to Day debug actions (which touch this
+// counter but write no report) went invisible to everyone else until the
+// next upload. This is a single small document, so listening to it directly
+// is effectively free (one read on load, one more only when it changes) and
+// makes those clock-only moves broadcast live like everything else already
+// does. Never moves state.day backward — report data (which is what prices
+// and Elo are actually computed from) always wins if it's further ahead.
+function subscribeToDayCounter(){
+  const ref = doc(db, 'counters', 'day');
+  unsubDayCounter = onSnapshot(ref, (snap) => {
+    const counterDay = snap.exists() ? (snap.data().value || 0) : 0;
+    if(counterDay > state.day){
+      state.day = counterDay;
+      checkAndSettlePositions();
+      renderAll();
+    }
+  });
+}
+
+function addUidBoxIfMissing(uid){
+  if(document.getElementById('uidBox')) return;
+  const box = document.createElement('div');
+  box.id = 'uidBox';
+  box.className = 'uid-box';
+  box.innerHTML = 'Your UID (to grant admin to others via the Firebase console <code>admins</code> collection): <b>' + uid + '</b>';
+  document.getElementById('debugPanel').querySelector('.panel-body').prepend(box);
+}
+
+const REQUIRED_HEADERS = ['name','profession','faction','kills','assists','deaths','damage','largest performed hit','damage taken','healing','largest heal','captures'];
+
+function validateAndParseReportHTML(text){
+  const doc_ = new DOMParser().parseFromString(text, 'text/html');
+  const table = doc_.querySelector('table');
+  if(!table) return { valid:false, error:'No <table> element found in this file.' };
+  const rows = Array.from(table.querySelectorAll('tr'));
+  if(rows.length < 2) return { valid:false, error:'Table has no data rows.' };
+
+  const headerCells = Array.from(rows[0].querySelectorAll('th,td')).map(c => c.textContent.trim().toLowerCase());
+  const missing = REQUIRED_HEADERS.filter(h => !headerCells.includes(h));
+  if(missing.length) return { valid:false, error:'Not a recognized battle report — missing column(s): ' + missing.join(', ') };
+
+  const colIndex = {};
+  headerCells.forEach((h,i) => { if(REQUIRED_HEADERS.includes(h)) colIndex[h] = i; });
+
+  const players = [];
+  for(let r=1; r<rows.length; r++){
+    const cells = Array.from(rows[r].querySelectorAll('td'));
+    if(cells.length === 0) continue;
+    const get = (h) => cells[colIndex[h]] ? cells[colIndex[h]].textContent.trim() : '';
+    const num = (h) => { const v = parseFloat(get(h)); return isNaN(v) ? 0 : v; };
+    const name = get('name');
+    if(!name) continue;
+    players.push({
+      name, profession: get('profession') || 'Unknown', faction: get('faction') || 'Unknown',
+      kills: num('kills'), assists: num('assists'), deaths: num('deaths'),
+      damage: num('damage'), largestHit: num('largest performed hit'), damageTaken: num('damage taken'),
+      healing: num('healing'), largestHeal: num('largest heal'), captures: num('captures')
+    });
+  }
+  if(players.length === 0) return { valid:false, error:'Header row matched, but no player rows could be parsed.' };
+  return { valid:true, players };
+}
+
+async function hashReportStats(players){
+  // Fingerprint on the fields that have stayed constant across every era of the
+  // export format — name, damage, healing, assists, deaths. Everything else
+  // (profession, faction, kills, largestHit, damageTaken, largestHeal, captures)
+  // is left out on purpose since those have drifted over time.
+  const sorted = [...players].sort((a,b) => a.name.localeCompare(b.name));
+  const canonical = sorted.map(p => [
+    p.name, p.damage, p.healing, p.assists, p.deaths
+  ].join('|')).join('\n');
+  const bytes = new TextEncoder().encode(canonical);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function submitReport(players, filename, isSynthetic){
+  const statsHash = await hashReportStats(players);
+  const counterRef = doc(db, 'counters', 'day');
+  const reportsCol = collection(db, 'reports');
+  const newReportRef = doc(reportsCol, statsHash); // deterministic ID: same stats -> same doc ID
+  let assignedDay;
+  await runTransaction(db, async (tx) => {
+    const existingReport = await tx.get(newReportRef);
+    if(existingReport.exists()){
+      const err = new Error('This exact report (same player stats) has already been uploaded.');
+      err.duplicate = true;
+      throw err;
+    }
+    const counterSnap = await tx.get(counterRef);
+    const current = counterSnap.exists() ? counterSnap.data().value : 0;
+    assignedDay = current + 1;
+    tx.set(counterRef, { value: assignedDay });
+    tx.set(newReportRef, {
+      day: assignedDay, filename, uploadedBy: state.uid, uploadedByUsername: state.username,
+      uploadedAt: serverTimestamp(), isSynthetic: !!isSynthetic, players
+    });
+  });
+  return assignedDay;
+}
+
+function readFileAsText(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(e.target.result);
+    reader.onerror = () => reject(new Error('Could not read file.'));
+    reader.readAsText(file);
+  });
+}
+
+async function handleUpload(file){
+  try{
+    const text = await readFileAsText(file);
+    const result = validateAndParseReportHTML(text);
+    if(!result.valid){ addReportLogRow(file.name, 'REJECTED: ' + result.error, true); return; }
+    const day = await submitReport(result.players, file.name, false);
+    addReportLogRow(file.name, 'Accepted — day ' + day + ', ' + result.players.length + ' stocks', false);
+  }catch(err){
+    addReportLogRow(file.name, (err.duplicate ? 'REJECTED: ' : 'ERROR: ') + err.message, true);
+  }
+}
+
+function addReportLogRow(filename, msg, isError){
+  const log = document.getElementById('reportLog');
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.setAttribute('data-manual','1');
+  row.innerHTML = '<span>' + escapeHtml(filename) + '</span><span style="color:' + (isError?'var(--red)':'') + '">' + escapeHtml(msg) + '</span>';
+  log.prepend(row);
+}
+
+const REPORTS_CACHE_KEY = 'bfx_reports_cache_v1';
+
+function loadCachedReports(){
+  try{
+    const raw = localStorage.getItem(REPORTS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){ return []; }
+}
+function saveCachedReports(list){
+  try{ localStorage.setItem(REPORTS_CACHE_KEY, JSON.stringify(list)); }
+  catch(e){ /* storage full/unavailable — safe to ignore, it's just a perf cache */ }
+}
+
+async function subscribeToPriceWeights(){
+  const ref = doc(db, 'settings', 'priceWeights');
+  unsubWeights = onSnapshot(ref, (snap) => {
+    // No admin has ever hit "Recalculate" yet — keep the built-in defaults.
+    PRICE_SCALE_SETTINGS = snap.exists() ? { ...DEFAULT_PRICE_SCALE, ...snap.data() } : { ...DEFAULT_PRICE_SCALE };
+    populateWeightInputsIfIdle();
+    recomputeMarket();
+    renderAll();
+  });
+}
+
+// Admin-only: pushes new price-scale settings to Firestore. Every connected
+// client (including this one) picks it up instantly via the onSnapshot
+// above and re-prices the whole market with the new curve — no reload
+// needed. This no longer has a separate weight set of its own — price
+// rides directly on Elo rank (see MEDIC_WEIGHTS/DPS_WEIGHTS/recomputeMarket),
+// so the only things left to tune are the two curve knobs below.
+async function recalculatePriceScale(){
+  if(!state.isAdmin) return;
+  const read = (id, fallback) => {
+    const v = parseFloat(document.getElementById(id).value);
+    return isNaN(v) ? fallback : v;
+  };
+  const settings = {
+    median: read('pMedian', PRICE_SCALE_SETTINGS.median),
+    top:    read('pTop',    PRICE_SCALE_SETTINGS.top),
+  };
+  const msg = document.getElementById('wMsg');
+  try{
+    await setDoc(doc(db, 'settings', 'priceWeights'), { ...settings, updatedAt: serverTimestamp(), updatedBy: state.username });
+    if(msg){ msg.textContent = 'Broadcast — every connected trader just recalculated.'; msg.className = 'auth-msg ok'; }
+  }catch(err){
+    if(msg){ msg.textContent = 'Failed: ' + err.message; msg.className = 'auth-msg err'; }
+  }
+}
+
+function populateWeightInputsIfIdle(){
+  // Don't stomp on values the admin is mid-typing.
+  const map = { pMedian: 'median', pTop: 'top' };
+  Object.keys(map).forEach(id => {
+    const el = document.getElementById(id);
+    if(el && document.activeElement !== el) el.value = PRICE_SCALE_SETTINGS[map[id]];
+  });
+}
+
+async function subscribeToMarket(){
+  if(reportsRecheckTimer){ clearInterval(reportsRecheckTimer); reportsRecheckTimer = null; }
+
+  const byId = new Map(loadCachedReports().map(r => [r.id, r]));
+
+  // Paint instantly from whatever's cached so there's no blank flash while we
+  // check in with Firestore.
+  const paint = () => {
+    const list = Array.from(byId.values()).sort((a,b) => a.day - b.day);
+    state.reports = list;
+    state.day = list.reduce((max,r) => Math.max(max, r.day), 0);
+    recomputeMarket();
+    renderAll();
+  };
+  if(byId.size) paint();
+
+  // Cheap sanity check: count() aggregation queries are billed at roughly
+  // 1/1000th of a normal read, so this is nearly free even on every load.
+  // If the live document count doesn't match what we have cached, something
+  // was deleted (or added) outside the normal flow — an admin delete, or a
+  // manual edit straight in the Firebase console — so we throw the cache
+  // away and fall back to one full resync instead of trusting stale data.
+  async function verifyAgainstServer(){
+    try{
+      const countSnap = await getCountFromServer(collection(db, 'reports'));
+      if(countSnap.data().count !== byId.size){
+        byId.clear();
+        saveCachedReports([]);
+        return true; // mismatch found — caller should resubscribe fresh
+      }
+    }catch(e){ /* transient error — keep trusting the cache for now */ }
+    return false;
+  }
+
+  if(await verifyAgainstServer()){
+    subscribeToMarket();
+    return;
+  }
+
+  const lastCachedDay = Array.from(byId.values()).reduce((max,r) => Math.max(max, r.day), 0);
+  const q = query(collection(db, 'reports'), where('day', '>', lastCachedDay), orderBy('day'));
+  unsubReports = onSnapshot(q, (snap) => {
+    snap.docChanges().forEach(change => {
+      const rep = { id: change.doc.id, ...change.doc.data() };
+      if(change.type === 'removed') byId.delete(rep.id);
+      else byId.set(rep.id, rep);
+    });
+    saveCachedReports(Array.from(byId.values()));
+    paint();
+    checkAndSettlePositions();
+  });
+
+  // Keep checking while the tab stays open, so a delete made elsewhere
+  // (admin panel or directly in the Firebase console) shows up without
+  // anyone needing to manually refresh.
+  reportsRecheckTimer = setInterval(async () => {
+    if(await verifyAgainstServer()){
+      if(unsubReports){ unsubReports(); unsubReports = null; }
+      subscribeToMarket();
+    }
+  }, 120000);
+}
+function subscribeToUserDoc(userRef){
+  unsubUserDoc = onSnapshot(userRef, (snap) => {
+    if(!snap.exists()) return;
+    const d = snap.data();
+    state.cash = d.cash; state.realized = d.realized;
+    renderStats();
+  });
+}
+function subscribeToPositions(uid){
+  const q = collection(db, 'users', uid, 'positions');
+  unsubPositions = onSnapshot(q, (snap) => {
+    state.positions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderPositions(); renderAssets(); renderHistory(); renderStats();
+  });
+}
+
+function statMeanStd(rows, key){
+  const vals = rows.map(r => (r.stats ? r.stats[key] : r[key]) || 0);
+  const mean = vals.reduce((a,b)=>a+b,0) / vals.length;
+  const variance = vals.reduce((a,b)=>a+Math.pow(b-mean,2),0) / vals.length;
+  return { mean, std: Math.sqrt(variance) || 1 };
+}
+function zscore(value, mean, std){ return std ? (value-mean)/std : 0; }
+function clampZ(z){ return Math.max(-Z_CLAMP, Math.min(Z_CLAMP, z)); }
+function normProf(p){ return String(p||'Unknown').trim().toLowerCase() || 'unknown'; }
+
+// Builds a per-profession {mean,std} lookup for one stat within a single
+// report, so a player's z-score reflects "compared to peers who do the same
+// job" instead of the whole mixed field. profOf(row) must return that row's
+// profession string. Falls back to the field-wide mean/std whenever a
+// profession has fewer than MIN_ROLE_SAMPLE representatives in this report —
+// with only a single one of a profession present there's no reliable baseline for it,
+// and field-wide is the safer default.
+function roleStatsLookup(rows, key, profOf){
+  const fieldWide = statMeanStd(rows, key);
+  const byProf = {};
+  rows.forEach(r => {
+    const prof = normProf(profOf(r));
+    (byProf[prof] = byProf[prof] || []).push(r);
+  });
+  const cache = {};
+  return (rawProf) => {
+    const prof = normProf(rawProf);
+    if(!cache[prof]){
+      const peers = byProf[prof] || [];
+      cache[prof] = peers.length >= MIN_ROLE_SAMPLE ? statMeanStd(peers, key) : fieldWide;
+    }
+    return cache[prof];
+  };
+}
+// Builds all five per-profession lookups for one report/day in one pass
+// (cheap — O(field size), done once per report, not once per row).
+function buildStatLookups(rows, profOf){
+  return {
+    damage:  roleStatsLookup(rows, 'damage',  profOf),
+    healing: roleStatsLookup(rows, 'healing', profOf),
+    kills:   roleStatsLookup(rows, 'kills',   profOf),
+    assists: roleStatsLookup(rows, 'assists', profOf),
+    deaths:  roleStatsLookup(rows, 'deaths',  profOf),
+  };
+}
+// Shared composite: how "good" one row's stat line was that report, relative
+// to role-appropriate peers, as a single weighted number. Used by both the
+// stock price model and Elo so they can never fall out of sync again.
+function weightedComposite(lookups, prof, s, weights){
+  const dmg = lookups.damage(prof), heal = lookups.healing(prof), kills = lookups.kills(prof),
+        assists = lookups.assists(prof), deaths = lookups.deaths(prof);
+  return weights.damage   * clampZ(zscore(s.damage,   dmg.mean,   dmg.std)) +
+         weights.healing  * clampZ(zscore(s.healing,  heal.mean,  heal.std)) +
+         weights.kills    * clampZ(zscore(s.kills,    kills.mean, kills.std)) +
+         weights.assists  * clampZ(zscore(s.assists,  assists.mean, assists.std)) -
+         weights.deaths   * clampZ(zscore(s.deaths,   deaths.mean, deaths.std));
+}
+
+// Single chronological pass that produces BOTH the Elo ladder and every
+// player's price history, since price now depends directly on Elo. For each
+// report, in day order: update Elo for that day's participants (unchanged
+// multiplayer head-to-head logic), then — for every player known so far,
+// whether or not they played today — stamp a fresh price for today from
+// their current Elo against today's population-wide Elo distribution. That
+// last step is what makes this non-compounding: it never looks at any
+// previous priceHistory entry, only at current Elo standing.
+function recomputeMarket(){
+  const ratings = {};  // name -> {elo, battles, profession}
+  const players = {};  // name -> {name, faction, profession, history, priceHistory}
+  const sortedReports = [...state.reports].sort((a,b)=>a.day-b.day);
+
+  sortedReports.forEach(rep => {
+    const rows = rep.players;
+
+    rows.forEach(r => {
+      if(!ratings[r.name]) ratings[r.name] = { elo: ELO_START, battles: 0, wins: 0, losses: 0, draws: 0, profession: r.profession };
+      ratings[r.name].profession = r.profession;
+      if(!players[r.name]) players[r.name] = { name: r.name, faction: r.faction, profession: r.profession, history: [], priceHistory: [] };
+      players[r.name].faction = r.faction;
+      players[r.name].profession = r.profession;
+      players[r.name].history.push(Object.assign({ day: rep.day }, r));
+    });
+
+    // MMR/Elo: primarily driven by TEAM RESULT (did your faction win this
+    // battle — see teamCombatScore/factionGroups above), scaled by a bounded
+    // PERFORMANCE MULTIPLIER built from the existing role-relative composite
+    // (weightedComposite — using MEDIC_WEIGHTS or DPS_WEIGHTS depending on
+    // that row's own class this report, see eloWeightsFor above). Needs at
+    // least 2 participants to mean anything.
+    if(rows.length >= 2){
+      const lookups = buildStatLookups(rows, r => r.profession);
+      const composite = {};
+      rows.forEach(r => { composite[r.name] = weightedComposite(lookups, r.profession, r, eloWeightsFor(r.profession)); });
+
+      const factions = factionGroups(rows);
+      const factionNames = Object.keys(factions);
+      const teamDeltas = {};
+
+      if(factionNames.length === 2){
+        const [fA, fB] = factionNames;
+        const rowsA = factions[fA], rowsB = factions[fB];
+        const scoreA = teamCombatScore(rowsA), scoreB = teamCombatScore(rowsB);
+        const actualA = scoreA > scoreB ? 1 : (scoreA < scoreB ? 0 : 0.5);
+        const actualB = 1 - actualA;
+        const avgEloA = rowsA.reduce((s,r)=>s+ratings[r.name].elo,0) / rowsA.length;
+        const avgEloB = rowsB.reduce((s,r)=>s+ratings[r.name].elo,0) / rowsB.length;
+        const mov = marginMultiplier(scoreA, scoreB, rowsA, rowsB);
+        // Real-Elo expectation: each player's own rating vs the OPPOSING
+        // team's average, not team-average-vs-team-average. Previously every
+        // player on a side got the same shared deltaA/deltaB regardless of
+        // their own rating, so a 3700-rated player kept getting scored as if
+        // they were exactly as likely to win as their ~1500 teammates —
+        // the "surprise" of winning never shrank as they pulled ahead, and
+        // nothing pulled them back down. Now a player who's already well
+        // above the opposing average is EXPECTED to win, so the same win
+        // yields a shrinking delta as their rating climbs, and a loss costs
+        // them more the higher they're sitting — the self-correcting
+        // behavior a real Elo ladder relies on.
+        rowsA.forEach(r => {
+          const expected = 1 / (1 + Math.pow(10, (avgEloB - ratings[r.name].elo) / 400));
+          teamDeltas[r.name] = TEAM_ELO_K * (actualA - expected) * mov;
+        });
+        rowsB.forEach(r => {
+          const expected = 1 / (1 + Math.pow(10, (avgEloA - ratings[r.name].elo) / 400));
+          teamDeltas[r.name] = TEAM_ELO_K * (actualB - expected) * mov;
+        });
+        const recordResult = (rowsSide, actual) => rowsSide.forEach(r => {
+          if(actual === 1) ratings[r.name].wins += 1;
+          else if(actual === 0) ratings[r.name].losses += 1;
+          else ratings[r.name].draws += 1;
+        });
+        recordResult(rowsA, actualA);
+        recordResult(rowsB, actualB);
+
+        rows.forEach(r => {
+          const mult = performanceMultiplier(composite[r.name]);
+          ratings[r.name].elo += teamDeltas[r.name] * mult;
+          ratings[r.name].battles += 1;
+        });
+      } else {
+        // Bad/missing faction data or more than two sides — no clean team
+        // result to score. Fall back to the original all-vs-all individual
+        // Elo so a malformed report still doesn't corrupt ratings, it just
+        // doesn't produce a win/loss record.
+        const n = rows.length;
+        const deltas = {};
+        rows.forEach(a => {
+          let actual = 0, expected = 0;
+          rows.forEach(b => {
+            if(a.name === b.name) return;
+            const cA = composite[a.name], cB = composite[b.name];
+            actual += cA > cB ? 1 : (cA < cB ? 0 : 0.5);
+            expected += 1 / (1 + Math.pow(10, (ratings[b.name].elo - ratings[a.name].elo) / 400));
+          });
+          deltas[a.name] = (ELO_K / (n-1)) * (actual - expected);
+        });
+        rows.forEach(r => { ratings[r.name].elo += deltas[r.name]; ratings[r.name].battles += 1; });
+      }
+    }
+
+    // Re-price EVERYONE known so far off today's Elo RANKING — including
+    // players who sat this report out, since their rank still shifts
+    // relative to everyone else's. No dependence on yesterday's price.
+    const allNames = Object.keys(ratings);
+    const todaysPrices = pricesFromEloSnapshot(ratings, allNames);
+    allNames.forEach(name => {
+      players[name].priceHistory.push({ day: rep.day, price: todaysPrices[name] });
+    });
+  });
+
+  state.players = players;
+  state.elo = ratings;
+}
+
+function currentPrice(symbol){
+  const p = state.players[symbol];
+  if(!p || p.priceHistory.length === 0) return null;
+  return p.priceHistory[p.priceHistory.length-1].price;
+}
+function priceAtOrBefore(symbol, day){
+  const p = state.players[symbol];
+  if(!p) return null;
+  let best = null;
+  p.priceHistory.forEach(ph => { if(ph.day <= day) best = ph.price; });
+  if(best === null && p.priceHistory.length) best = p.priceHistory[0].price;
+  return best;
+}
+function volatility(symbol){
+  const p = state.players[symbol];
+  if(!p || p.priceHistory.length < 2) return 0.25;
+  const prices = p.priceHistory.map(x=>x.price);
+  const returns = [];
+  for(let i=1;i<prices.length;i++) if(prices[i-1]>0) returns.push((prices[i]-prices[i-1])/prices[i-1]);
+  if(returns.length===0) return 0.25;
+  const mean = returns.reduce((a,b)=>a+b,0)/returns.length;
+  const variance = returns.reduce((a,b)=>a+Math.pow(b-mean,2),0)/returns.length;
+  return Math.max(0.05, Math.sqrt(variance));
+}
+function computeOptionPremium(symbol, strike, daysToExpiry, isPut){
+  const price = currentPrice(symbol);
+  if(price === null) return null;
+  const intrinsic = isPut ? Math.max(0, strike-price) : Math.max(0, price-strike);
+  const vol = volatility(symbol);
+  const timeValue = price * vol * Math.sqrt(Math.max(1,daysToExpiry)) * 0.4;
+  const premium = Math.max(0.5, intrinsic + timeValue);
+  return { price, intrinsic, timeValue, premium: Math.round(premium*100)/100 };
+}
+// Builds a strike chain around the current price the way a real options
+// screen does — a spread of evenly-stepped strikes, step size scaled to
+// the underlying's price level, centered on at-the-money.
+function generateStrikeChain(price){
+  if(!price) return [];
+  let step;
+  if(price < 20) step = 0.5;
+  else if(price < 100) step = 1;
+  else if(price < 300) step = 2.5;
+  else step = 5;
+  const atm = Math.round(price/step)*step;
+  const strikes = [];
+  for(let i=-6;i<=6;i++){
+    const s = Math.round((atm + i*step)*100)/100;
+    if(s > 0) strikes.push(s);
+  }
+  return strikes;
+}
+
+function updateStrikeChain(){
+  const symbol = document.getElementById('optSymbol').value;
+  const sel = document.getElementById('optStrikeSelect');
+  const customField = document.getElementById('optStrikeCustomField');
+  customField.classList.add('hidden');
+  const price = currentPrice(symbol);
+  if(!symbol || price === null){
+    sel.innerHTML = '<option value="">— select a stock first —</option>';
+    document.getElementById('optStrike').value = '';
+    return;
+  }
+  const isPut = state.tradeType === 'put';
+  const strikes = generateStrikeChain(price);
+  let closest = strikes[0], closestDiff = Infinity;
+  strikes.forEach(s => { const d = Math.abs(s-price); if(d < closestDiff){ closest = s; closestDiff = d; } });
+  sel.innerHTML = strikes.map(s => {
+    const label = s === closest ? ' (ATM)' : ((isPut ? s > price : s < price) ? ' (ITM)' : ' (OTM)');
+    return '<option value="' + s + '">$' + s.toFixed(2) + label + '</option>';
+  }).join('') + '<option value="custom">Custom…</option>';
+  sel.value = closest;
+  document.getElementById('optStrike').value = closest;
+}
+
+function estimateTriggerProbability(symbol, threshold){
+  const p = state.players[symbol];
+  if(!p || p.history.length < 2) return 0.2;
+  const hits = p.history.filter(h => h.deaths >= threshold).length;
+  return Math.max(0.03, hits / p.history.length);
+}
+function computeSwapPremium(symbol, threshold, notional, daysToExpiry){
+  const perReportProb = estimateTriggerProbability(symbol, threshold);
+  const probAtLeastOnce = 1 - Math.pow(1-perReportProb, Math.max(1,daysToExpiry));
+  const premium = Math.max(0.5, notional * probAtLeastOnce * 1.15);
+  return { perReportProb, probAtLeastOnce, premium: Math.round(premium*100)/100 };
+}
+
+const TEST_PROFESSIONS = ['Commando','Bounty Hunter','Officer','Smuggler','Medic','Jedi'];
+const TEST_FACTIONS = ['Imperial','Rebel'];
+function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+
+document.getElementById('dbgTestReport').addEventListener('click', async () => {
+  let names = Object.keys(state.players);
+  if(names.length === 0) names = ['TESTPLAYER1','TESTPLAYER2','TESTPLAYER3','TESTPLAYER4'];
+  const players = names.map(name => {
+    const existing = state.players[name];
+    return {
+      name,
+      faction: existing ? existing.faction : TEST_FACTIONS[randInt(0,1)],
+      profession: existing ? existing.profession : TEST_PROFESSIONS[randInt(0,TEST_PROFESSIONS.length-1)],
+      kills: randInt(0,12), assists: randInt(0,35), deaths: randInt(0,8),
+      damage: randInt(50000,1500000), largestHit: randInt(1000,12000),
+      damageTaken: randInt(50000,900000), healing: randInt(0,2200000),
+      largestHeal: randInt(0,55000), captures: randInt(0,2)
+    };
+  });
+  try{ await submitReport(players, '[debug] synthetic report', true); }
+  catch(err){ alert('Could not create synthetic report: ' + err.message); }
+});
+
+document.getElementById('dbgFindDupes').addEventListener('click', async () => {
+  const out = document.getElementById('dupeResults');
+  out.textContent = 'Scanning ' + state.reports.length + ' existing reports…';
+
+  const byHash = {};
+  for(const rep of state.reports){
+    const hash = await hashReportStats(rep.players);
+    (byHash[hash] = byHash[hash] || []).push(rep);
+  }
+  const dupGroups = Object.values(byHash)
+    .filter(g => g.length > 1)
+    .map(g => g.sort((a,b) => a.day - b.day));
+
+  if(dupGroups.length === 0){
+    out.textContent = 'Checked ' + state.reports.length + ' reports — no duplicate stats found.';
+    return;
+  }
+
+  out.innerHTML = '<div style="color:var(--red); margin-bottom:8px;">' + dupGroups.length + ' set(s) of reports share identical player stats:</div>' +
+    dupGroups.map(group => '<div class="dupe-group">' + group.map((rep,i) =>
+      '<div>' + (i===0 ? '✓ keep — ' : '✕ dup — ') + 'Day ' + rep.day + ' · ' + escapeHtml(rep.filename) +
+      (rep.isSynthetic ? ' [synthetic]' : '') + ' · by ' + escapeHtml(rep.uploadedByUsername||'?') +
+      (i===0 ? '' : ' <button class="del-report" data-reportid="' + rep.id + '">Delete</button>') + '</div>'
+    ).join('') + '</div>').join('');
+
+  out.querySelectorAll('.del-report').forEach(btn => btn.addEventListener('click', () => deleteReport(btn.dataset.reportid)));
+});
+
+document.getElementById('dbgMigrateReports').addEventListener('click', async () => {
+  const out = document.getElementById('dupeResults');
+  out.textContent = 'Analyzing ' + state.reports.length + ' reports…';
+
+  // Stable local copy — the live listener may reassign state.reports mid-run
+  // as batches commit, so we work from a fixed snapshot taken right now.
+  const snapshot = [...state.reports];
+  const byHash = {};
+  for(const rep of snapshot){
+    const hash = await hashReportStats(rep.players);
+    (byHash[hash] = byHash[hash] || []).push({ hash, rep });
+  }
+
+  const toDelete = [];  // extra copies within a duplicate group
+  const toRekey = [];   // the one kept report per group, if not already filed at its hash ID
+
+  Object.values(byHash).forEach(group => {
+    group.sort((a,b) => a.rep.day - b.rep.day);
+    const [keep, ...extras] = group;
+    extras.forEach(e => toDelete.push(e.rep));
+    if(keep.rep.id !== keep.hash) toRekey.push(keep);
+  });
+
+  if(toDelete.length === 0 && toRekey.length === 0){
+    out.textContent = 'Checked ' + snapshot.length + ' reports — no duplicates, and every report is already filed under its duplicate-proof ID. Nothing to do.';
+    return;
+  }
+
+  const ok = confirm(
+    'Found ' + snapshot.length + ' reports.\n' +
+    toDelete.length + ' will be deleted as exact duplicates.\n' +
+    toRekey.length + ' unique report(s) will be re-filed under duplicate-proof IDs so future uploads get checked against them too.\n\n' +
+    'This cannot be undone. Continue?'
+  );
+  if(!ok){ out.textContent = 'Cancelled — no changes made.'; return; }
+
+  const ops = [];
+  toDelete.forEach(rep => ops.push({ type:'delete', rep }));
+  toRekey.forEach(({rep,hash}) => ops.push({ type:'rekey', rep, hash }));
+
+  const CHUNK = 200; // up to 2 writes per item -> up to 400 writes/batch, safely under Firestore's 500 limit
+  let done = 0;
+  out.textContent = 'Working… 0 / ' + ops.length;
+  for(let i=0; i<ops.length; i+=CHUNK){
+    const chunk = ops.slice(i, i+CHUNK);
+    const batch = writeBatch(db);
+    chunk.forEach(op => {
+      if(op.type === 'delete'){
+        batch.delete(doc(db, 'reports', op.rep.id));
+      } else {
+        const { day, filename, uploadedBy, uploadedByUsername, uploadedAt, isSynthetic, players } = op.rep;
+        batch.set(doc(db, 'reports', op.hash), { day, filename, uploadedBy, uploadedByUsername, uploadedAt, isSynthetic, players });
+        batch.delete(doc(db, 'reports', op.rep.id));
+      }
+    });
+    await batch.commit();
+    done += chunk.length;
+    out.textContent = 'Working… ' + done + ' / ' + ops.length;
+  }
+
+  out.textContent = 'Done. Deleted ' + toDelete.length + ' duplicate report(s) and re-filed ' + toRekey.length + ' report(s) under duplicate-proof IDs. New uploads will now be checked against all of them, no matter how old.';
+});
+
+document.getElementById('dbgAdvanceDay').addEventListener('click', async () => {
+  const counterRef = doc(db, 'counters', 'day');
+  try{
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(counterRef);
+      const current = snap.exists() ? snap.data().value : 0;
+      tx.set(counterRef, { value: current + 1 });
+    });
+  }catch(err){ alert('Could not advance the clock: ' + err.message); }
+});
+
+document.getElementById('dbgJumpBtn').addEventListener('click', async () => {
+  const target = parseInt(document.getElementById('dbgJumpDay').value, 10);
+  if(isNaN(target) || target < state.day){ alert('Enter a day greater than the current day (' + state.day + ').'); return; }
+  try{ await setDoc(doc(db,'counters','day'), { value: target }); }
+  catch(err){ alert('Could not jump the clock: ' + err.message); }
+});
+
+document.getElementById('dbgRecalc').addEventListener('click', recalculatePriceScale);
+
+async function deleteReport(reportId){
+  if(!confirm('Delete this report from the shared market? Prices for everyone will recompute without it.')) return;
+  try{ await deleteDoc(doc(db, 'reports', reportId)); }
+  catch(err){ alert('Could not delete report: ' + err.message); }
+}
+
+document.querySelectorAll('.type-tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.tradeType = btn.dataset.type;
+    document.querySelectorAll('.type-tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('fieldsCallPut').classList.toggle('hidden', state.tradeType==='swap');
+    document.getElementById('fieldsSwap').classList.toggle('hidden', state.tradeType!=='swap');
+    document.getElementById('rowIntrinsic').style.display = state.tradeType==='swap' ? 'none' : 'flex';
+    document.getElementById('rowProb').style.display = state.tradeType==='swap' ? 'flex' : 'none';
+    document.getElementById('timeValueLabel').textContent = state.tradeType==='swap' ? 'Risk-adjusted premium load' : 'Time value (volatility-based)';
+    const descs = {
+      call: 'Call: pays off if the stock finishes ABOVE your strike at expiry. Payoff = max(0, settle price minus strike) x contracts.',
+      put: 'Put: pays off if the stock finishes BELOW your strike at expiry. Payoff = max(0, strike minus settle price) x contracts.',
+      swap: "Elimination Swap (a fictional credit-default-swap analog): you're buying protection that pays a fixed notional the moment the player's Deaths in any single report hit your trigger, any time before expiry, not just at expiry. If it never triggers, it expires worthless."
+    };
+    document.getElementById('typeDesc').textContent = descs[state.tradeType];
+    if(state.tradeType !== 'swap') updateStrikeChain();
+    renderPremiumPreview();
+  });
+});
+document.querySelector('.type-tabs button[data-type="call"]').click();
+
+async function buyContract(){
+  const symbol = document.getElementById('optSymbol').value;
+  const expiryDays = parseInt(document.getElementById('optExpiry').value,10);
+  const qty = parseInt(document.getElementById('optQty').value,10);
+  const msgEl = document.getElementById('buyMsg');
+  msgEl.className='msg'; msgEl.textContent='';
+
+  if(!symbol){ msgEl.className='msg err'; msgEl.textContent='Pick a stock first.'; return; }
+  if(isNaN(expiryDays)||expiryDays<1){ msgEl.className='msg err'; msgEl.textContent='Expiry must be at least 1 day out.'; return; }
+  if(isNaN(qty)||qty<1){ msgEl.className='msg err'; msgEl.textContent='Enter a valid contract quantity.'; return; }
+
+  if(state.tradeType === 'swap'){
+    const threshold = parseInt(document.getElementById('swapThreshold').value,10);
+    const notional = parseFloat(document.getElementById('swapNotional').value);
+    if(isNaN(threshold)||threshold<1){ msgEl.className='msg err'; msgEl.textContent='Enter a valid trigger threshold.'; return; }
+    if(isNaN(notional)||notional<=0){ msgEl.className='msg err'; msgEl.textContent='Enter a valid notional payout.'; return; }
+    const calc = computeSwapPremium(symbol, threshold, notional, expiryDays);
+    const premium = Math.round(calc.premium*100)/100; // round ONCE, here — this exact value is what the rules re-derive cost from
+    const totalCost = premium*qty;                    // no further rounding: must match premium*qty bit-for-bit in the rule
+    if(totalCost > state.cash){ msgEl.className='msg err'; msgEl.textContent='Not enough cash. Need ' + fmtMoney(totalCost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
+    const positionData = {
+      type:'swap', symbol, threshold, notional, expiryDay: state.day+expiryDays,
+      qty, premium, boughtDay: state.day, status:'open', settlePrice:null, dismissed:false
+    };
+    await commitTrade(positionData, totalCost, 'Bought ' + qty + 'x ' + symbol + ' elimination swap (trigger: deaths >= ' + threshold + ')', msgEl);
+  } else {
+    const strike = parseFloat(document.getElementById('optStrike').value);
+    if(isNaN(strike)||strike<=0){ msgEl.className='msg err'; msgEl.textContent='Enter a valid strike price.'; return; }
+    const calc = computeOptionPremium(symbol, strike, expiryDays, state.tradeType==='put');
+    if(!calc){ msgEl.className='msg err'; msgEl.textContent='No price data for that stock yet.'; return; }
+    const premium = Math.round(calc.premium*100)/100; // round ONCE, here — this exact value is what the rules re-derive cost from
+    const totalCost = premium*qty;                    // no further rounding: must match premium*qty bit-for-bit in the rule
+    if(totalCost > state.cash){ msgEl.className='msg err'; msgEl.textContent='Not enough cash. Need ' + fmtMoney(totalCost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
+    const positionData = {
+      type: state.tradeType, symbol, strike, expiryDay: state.day+expiryDays,
+      qty, premium, boughtDay: state.day, status:'open', settlePrice:null, dismissed:false
+    };
+    await commitTrade(positionData, totalCost, 'Bought ' + qty + 'x ' + symbol + ' $' + strike.toFixed(2) + ' ' + state.tradeType, msgEl);
+  }
+}
+
+async function commitTrade(positionData, totalCost, successMsg, msgEl){
+  try{
+    const posRef = doc(collection(db,'users',state.uid,'positions'));
+    const userRef = doc(db,'users',state.uid);
+    const batch = writeBatch(db);
+    // cashDelta/realizedDelta let the security rules verify this position's
+    // declared cost matches exactly what's being taken out of your cash —
+    // both writes land in the same atomic batch, so one can't happen without the other.
+    batch.set(posRef, { ...positionData, cashDelta: -totalCost, realizedDelta: 0 });
+    batch.update(userRef, { cash: state.cash - totalCost, realized: state.realized, lastTradeId: posRef.id });
+    await batch.commit();
+    msgEl.className='msg ok'; msgEl.textContent = successMsg + ', expiring day ' + positionData.expiryDay + '.';
+  }catch(err){
+    msgEl.className='msg err'; msgEl.textContent = 'Trade failed: ' + err.message;
+  }
+}
+document.getElementById('buyBtn').addEventListener('click', buyContract);
+
+async function settleOptionPosition(pos, settleDay){
+  const settlePrice = priceAtOrBefore(pos.symbol, settleDay) ?? currentPrice(pos.symbol) ?? 0;
+  const payoff = pos.type === 'put'
+    ? Math.max(0, pos.strike - settlePrice) * pos.qty
+    : Math.max(0, settlePrice - pos.strike) * pos.qty;
+  await applySettlement(pos, settlePrice, payoff);
+}
+async function settleSwapPosition(pos, triggered){
+  const settlePrice = currentPrice(pos.symbol) ?? 0;
+  const payoff = triggered ? pos.notional * pos.qty : 0;
+  await applySettlement(pos, settlePrice, payoff);
+}
+async function applySettlement(pos, settlePrice, payoff){
+  const cost = pos.premium * pos.qty;
+  const status = payoff > 0 ? 'won' : 'lost';
+  const posRef = doc(db,'users',state.uid,'positions',pos.id);
+  const userRef = doc(db,'users',state.uid);
+  const batch = writeBatch(db);
+  batch.update(posRef, { status, settlePrice, payoff, cashDelta: payoff, realizedDelta: payoff - cost });
+  batch.update(userRef, { cash: state.cash + payoff, realized: state.realized + (payoff - cost), lastTradeId: pos.id });
+  await batch.commit();
+}
+
+async function checkAndSettlePositions(){
+  for(const pos of state.positions){
+    if(pos.status !== 'open' || pos.type === 'stock') continue;
+    if(pos.type === 'swap'){
+      const relevantReports = state.reports
+        .filter(r => r.day > pos.boughtDay && r.day <= pos.expiryDay)
+        .sort((a,b) => a.day - b.day);
+      let triggered = false;
+      for(const rep of relevantReports){
+        const row = rep.players.find(p => p.name === pos.symbol);
+        if(row && row.deaths >= pos.threshold){ triggered = true; break; }
+      }
+      if(triggered){ await settleSwapPosition(pos, true); }
+      else if(state.day >= pos.expiryDay){ await settleSwapPosition(pos, false); }
+    } else {
+      if(state.day >= pos.expiryDay){ await settleOptionPosition(pos, pos.expiryDay); }
+    }
+  }
+}
+
+async function dismissPosition(posId){
+  await updateDoc(doc(db,'users',state.uid,'positions',posId), { dismissed: true });
+}
+
+async function closePositionEarly(posId){
+  const pos = state.positions.find(p => p.id === posId);
+  if(!pos || pos.status !== 'open' || pos.type==='stock') return;
+  if(!confirm('Close this position now and lock in its current value?')) return;
+  const price = currentPrice(pos.symbol) ?? 0;
+  let payoff;
+  if(pos.type === 'swap'){
+    const remaining = Math.max(1, pos.expiryDay - state.day);
+    payoff = computeSwapPremium(pos.symbol, pos.threshold, pos.notional, remaining).premium * pos.qty;
+  } else {
+    payoff = (pos.type==='put' ? Math.max(0,pos.strike-price) : Math.max(0,price-pos.strike)) * pos.qty;
+  }
+  payoff = Math.round(payoff*100)/100;
+  const realizedDelta = payoff - pos.premium*pos.qty;
+  try{
+    const posRef = doc(db,'users',state.uid,'positions',pos.id);
+    const userRef = doc(db,'users',state.uid);
+    const batch = writeBatch(db);
+    batch.update(posRef, { status: payoff>0?'won':'lost', settlePrice: price, payoff, closedEarly: true, cashDelta: payoff, realizedDelta });
+    batch.update(userRef, { cash: state.cash + payoff, realized: state.realized + realizedDelta, lastTradeId: pos.id });
+    await batch.commit();
+  }catch(err){ alert('Could not close position: ' + err.message); }
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const CLASS_PALETTE = ['#4dff9e','#5db8ff','#ffb84d','#ff5d5d','#c792ea','#7fd1ff','#ffe066','#8fd6a8'];
+function classColor(cls){
+  const s = String(cls||'Unknown');
+  let hash = 0;
+  for(let i=0;i<s.length;i++) hash = (hash*31 + s.charCodeAt(i)) >>> 0;
+  return CLASS_PALETTE[hash % CLASS_PALETTE.length];
+}
+function fmtMoney(n){ return '$' + Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+let chart = null;
+function renderChart(){
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  const symbols = Array.from(state.selectedSymbols);
+  const palette = ['#4dff9e','#5db8ff','#ffb84d','#ff5d5d','#c792ea','#7fd1ff','#ffe066'];
+  const datasets = symbols.map((sym,i) => ({
+    label: sym,
+    data: state.players[sym] ? state.players[sym].priceHistory.map(h=>({x:h.day,y:h.price})) : [],
+    borderColor: palette[i%palette.length], backgroundColor:'transparent', tension:0.25, pointRadius:3
+  }));
+  if(chart) chart.destroy();
+  chart = new Chart(ctx, { type:'line', data:{datasets}, options:{
+    responsive:true, interaction:{mode:'nearest',intersect:false},
+    scales:{ x:{type:'linear',ticks:{color:'#7fa08c',stepSize:1,callback:v=>'Day '+v},grid:{color:'#1b271f'},title:{display:true,text:'Trading day',color:'#7fa08c'}},
+             y:{ticks:{color:'#7fa08c'},grid:{color:'#1b271f'}} },
+    plugins:{ legend:{labels:{color:'#d7ecdf'}} }
+  }});
+}
+
+function sparkline(priceHistory){
+  const w=70,h=24;
+  if(priceHistory.length<2) return '<svg class="spark" viewBox="0 0 ' + w + ' ' + h + '"></svg>';
+  const prices = priceHistory.map(p=>p.price);
+  const min=Math.min(...prices), max=Math.max(...prices), range=(max-min)||1;
+  const step = w/(prices.length-1);
+  const pts = prices.map((p,i)=>(i*step).toFixed(1)+','+(h-((p-min)/range)*h).toFixed(1)).join(' ');
+  const color = prices[prices.length-1] >= prices[0] ? '#4dff9e' : '#ff5d5d';
+  return '<svg class="spark" viewBox="0 0 ' + w + ' ' + h + '"><polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.6"/></svg>';
+}
+
+function renderTicker(){
+  const body = document.getElementById('tickerBody');
+  const allSymbols = Object.keys(state.players).sort((a,b)=>(currentPrice(b)||0)-(currentPrice(a)||0));
+  document.getElementById('tickerSub').textContent = allSymbols.length ? (allSymbols.length + ' stocks listed — day ' + state.day) : 'no stocks listed yet';
+
+  const q = (state.tickerSearch || '').trim().toLowerCase();
+  const symbols = q ? allSymbols.filter(sym => sym.toLowerCase().includes(q) || (state.players[sym].profession||'').toLowerCase().includes(q)) : allSymbols;
+
+  if(allSymbols.length===0){
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">Upload a battle report to list the first stocks.</td></tr>';
+  } else if(symbols.length===0){
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">No symbols match “' + escapeHtml(state.tickerSearch) + '”.</td></tr>';
+  } else {
+    body.innerHTML = symbols.map(sym => {
+      const p = state.players[sym];
+      const ph = p.priceHistory;
+      const price = ph[ph.length-1].price;
+      const prev = ph.length>1 ? ph[ph.length-2].price : price;
+      const chg = price-prev, chgPct = prev ? (chg/prev*100) : 0;
+      const chgClass = chg>0?'up':chg<0?'down':'flat';
+      const arrow = chg>0?'▲':chg<0?'▼':'—';
+      const vol = volatility(sym);
+      return '<tr>'
+        + '<td><div class="sym">' + escapeHtml(sym) + '</div></td>'
+        + '<td><span class="cls-pill" style="color:' + classColor(p.profession) + '">' + escapeHtml(p.profession) + '</span></td>'
+        + '<td class="price">' + fmtMoney(price) + '</td>'
+        + '<td class="chg ' + chgClass + '">' + arrow + ' ' + (chg>=0?'+':'') + chg.toFixed(2) + ' (' + chgPct.toFixed(1) + '%)</td>'
+        + '<td style="color:var(--text-dim)">' + (vol*100).toFixed(0) + '%</td>'
+        + '<td>' + sparkline(ph) + '</td>'
+        + '<td><button type="button" class="buy-btn" data-symbol="' + escapeHtml(sym) + '">Options</button> <button type="button" class="buy-btn" data-asset-symbol="' + escapeHtml(sym) + '">Buy Stock</button></td>'
+        + '</tr>';
+    }).join('');
+    body.querySelectorAll('button[data-symbol]').forEach(btn => btn.addEventListener('click', () => {
+      document.getElementById('optSymbol').value = btn.dataset.symbol;
+      document.getElementById('optSymbol').dispatchEvent(new Event('change'));
+    }));
+    body.querySelectorAll('button[data-asset-symbol]').forEach(btn => btn.addEventListener('click', () => {
+      setAssetSymbol(btn.dataset.assetSymbol);
+      activateNav(navAssets, viewAssets);
+      renderAssets();
+      document.getElementById('assetSymbol').focus();
+    }));
+  }
+
+  const sel = document.getElementById('optSymbol');
+  const prevVal = sel.value;
+  sel.innerHTML = '<option value="">— select a stock —</option>' + allSymbols.map(s=>'<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + ' — ' + fmtMoney(currentPrice(s)) + '</option>').join('');
+  if(allSymbols.includes(prevVal)) sel.value = prevVal;
+
+  const pills = document.getElementById('legendPills');
+  pills.innerHTML = allSymbols.slice(0,30).map(s=>'<button type="button" data-symbol="' + escapeHtml(s) + '" class="' + (state.selectedSymbols.has(s)?'active':'') + '">' + escapeHtml(s) + '</button>').join('');
+  pills.querySelectorAll('button').forEach(btn => {
+    btn.style.background = state.selectedSymbols.has(btn.dataset.symbol) ? 'var(--phosphor-dim)' : '';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const scrollY = window.scrollY;
+      if(state.selectedSymbols.has(btn.dataset.symbol)) state.selectedSymbols.delete(btn.dataset.symbol);
+      else state.selectedSymbols.add(btn.dataset.symbol);
+      btn.classList.toggle('active', state.selectedSymbols.has(btn.dataset.symbol));
+      btn.style.background = state.selectedSymbols.has(btn.dataset.symbol) ? 'var(--phosphor-dim)' : '';
+      renderChart();
+      btn.blur();
+      window.scrollTo(0, scrollY);
+    });
+  });
+
+  document.getElementById('dayTick').textContent = state.reports.length
+    ? ('DAY ' + state.day + ' — ' + state.reports.length + ' report' + (state.reports.length>1?'s':'') + ' on record')
+    : 'DAY 0 — AWAITING FIRST REPORT';
+
+  renderReportLogFromState();
+}
+
+function renderReportLogFromState(){
+  const log = document.getElementById('reportLog');
+  const sorted = [...state.reports].sort((a,b) => b.day - a.day);
+  Array.from(log.querySelectorAll('.row:not([data-manual])')).forEach(r => r.remove());
+  sorted.forEach(rep => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const delBtn = state.isAdmin ? '<button class="del-report" data-reportid="' + rep.id + '">Delete</button>' : '';
+    row.innerHTML = '<span>Day ' + rep.day + ' · ' + escapeHtml(rep.filename) + (rep.isSynthetic?' [synthetic]':'') + '</span><span>' + rep.players.length + ' stocks · by ' + escapeHtml(rep.uploadedByUsername||'?') + ' ' + delBtn + '</span>';
+    log.appendChild(row);
+  });
+  log.querySelectorAll('.del-report').forEach(btn => btn.addEventListener('click', () => deleteReport(btn.dataset.reportid)));
+}
+
+function renderPremiumPreview(){
+  const symbol = document.getElementById('optSymbol').value;
+  const expiryDays = parseInt(document.getElementById('optExpiry').value,10)||1;
+  const qty = parseInt(document.getElementById('optQty').value,10)||1;
+  const buyBtn = document.getElementById('buyBtn');
+
+  if(!symbol){
+    ['pbCurrent','pbIntrinsic','pbProb','pbTime','pbPremium','pbTotal'].forEach(id=>document.getElementById(id).textContent='—');
+    buyBtn.disabled = true; buyBtn.textContent = 'Select a stock first';
+    return;
+  }
+  const price = currentPrice(symbol);
+  document.getElementById('pbCurrent').textContent = fmtMoney(price);
+
+  if(state.tradeType === 'swap'){
+    const threshold = parseInt(document.getElementById('swapThreshold').value,10) || 1;
+    const notional = parseFloat(document.getElementById('swapNotional').value) || 0;
+    const calc = computeSwapPremium(symbol, threshold, notional, expiryDays);
+    document.getElementById('pbProb').textContent = (calc.probAtLeastOnce*100).toFixed(1) + '%';
+    document.getElementById('pbTime').textContent = fmtMoney(calc.premium);
+    document.getElementById('pbPremium').textContent = fmtMoney(calc.premium);
+    document.getElementById('pbTotal').textContent = fmtMoney(calc.premium*qty);
+    buyBtn.disabled = false;
+    buyBtn.textContent = 'Buy ' + qty + 'x ' + symbol + ' Elim. Swap';
+  } else {
+    const strikeInput = document.getElementById('optStrike');
+    if(!strikeInput.value && price) strikeInput.value = price.toFixed(2);
+    const strike = parseFloat(strikeInput.value) || price;
+    const calc = computeOptionPremium(symbol, strike, expiryDays, state.tradeType==='put');
+    if(!calc) return;
+    document.getElementById('pbIntrinsic').textContent = fmtMoney(calc.intrinsic);
+    document.getElementById('pbTime').textContent = fmtMoney(calc.timeValue);
+    document.getElementById('pbPremium').textContent = fmtMoney(calc.premium);
+    document.getElementById('pbTotal').textContent = fmtMoney(calc.premium*qty);
+    buyBtn.disabled = false;
+    buyBtn.textContent = 'Buy ' + qty + 'x ' + symbol + ' $' + strike.toFixed(2) + ' ' + (state.tradeType==='put'?'Put':'Call');
+  }
+}
+
+// NOTE: Firestore rules now enforce (see firestore.rules):
+//  - a bare write to your own cash/realized field, with no matching position
+//    write in the same batch, is rejected outright
+//  - the position's declared cashDelta must exactly equal -(premium*qty) /
+//    -(avgCost*qty) at open, and the cash write must exactly match that delta
+//  - starting balance is fixed at signup (10000/0), not client-chosen
+//  - an open option/swap's premium/qty/symbol/type can't be edited after creation
+// STILL NOT covered without a trusted server: nothing here verifies that the
+// *premium itself* is a fair price for the option/swap (that needs the full
+// pricing formula run against report history, which rules can't execute) —
+// only that whatever premium you open at is what you actually pay and get paid on.
+function stockPositionId(symbol){
+  return 'stock_' + encodeURIComponent(symbol).replace(/\./g,'%2E');
+}
+function getStockPositions(){
+  return state.positions.filter(p => p.type==='stock' && p.status==='open' && p.qty>0);
+}
+function setAssetSymbol(symbol){
+  state.assetSymbol = symbol || '';
+  const sel = document.getElementById('assetSymbol');
+  if(sel) sel.value = state.assetSymbol;
+  renderAssetPreview();
+}
+function renderAssetPreview(){
+  const symbol = document.getElementById('assetSymbol')?.value || state.assetSymbol || '';
+  const qty = parseInt(document.getElementById('assetQty')?.value,10) || 1;
+  const price = currentPrice(symbol);
+  document.getElementById('assetCurrent').textContent = price==null ? '—' : fmtMoney(price);
+  document.getElementById('assetShares').textContent = symbol ? String(qty) : '—';
+  document.getElementById('assetTotal').textContent = price==null ? '—' : fmtMoney(price*qty);
+  const btn = document.getElementById('assetBuyBtn');
+  btn.disabled = price==null || qty<1;
+  btn.textContent = symbol && price!=null ? 'Buy ' + qty + 'x ' + symbol : 'Select a stock first';
+}
+async function buyStock(){
+  const symbol = document.getElementById('assetSymbol').value;
+  const qty = parseInt(document.getElementById('assetQty').value,10);
+  const msg = document.getElementById('assetMsg');
+  msg.className='msg'; msg.textContent='';
+  const rawPrice = currentPrice(symbol);
+  if(!symbol || rawPrice==null){ msg.className='msg err'; msg.textContent='Pick a stock first.'; return; }
+  if(isNaN(qty) || qty<1){ msg.className='msg err'; msg.textContent='Enter a valid share quantity.'; return; }
+  const price = Math.round(rawPrice*100)/100; // round ONCE, here — matches what the rule re-derives cost from
+  const cost = price*qty;                     // no further rounding: must match price*qty bit-for-bit in the rule
+  if(cost > state.cash){ msg.className='msg err'; msg.textContent='Not enough cash. Need ' + fmtMoney(cost) + ', have ' + fmtMoney(state.cash) + '.'; return; }
+  try{
+    const ref = doc(db,'users',state.uid,'positions',stockPositionId(symbol));
+    const userRef = doc(db,'users',state.uid);
+    const snap = await getDoc(ref);
+    const existing = snap.exists() ? snap.data() : null;
+    const batch = writeBatch(db);
+    if(existing && existing.type==='stock' && existing.status==='open'){
+      const newQty = Number(existing.qty||0) + qty;
+      const newAvg = ((Number(existing.qty||0)*Number(existing.avgCost||0)) + cost) / newQty;
+      batch.set(ref, { type:'stock', symbol, qty:newQty, avgCost:Math.round(newAvg*100)/100, boughtDay:existing.boughtDay ?? state.day, status:'open', dismissed:false, cashDelta:-cost, realizedDelta:0 });
+    } else {
+      batch.set(ref, { type:'stock', symbol, qty, avgCost:price, boughtDay:state.day, status:'open', dismissed:false, cashDelta:-cost, realizedDelta:0 });
+    }
+    batch.update(userRef, { cash: state.cash - cost, realized: state.realized, lastTradeId: ref.id });
+    await batch.commit();
+    renderAssets(); renderStats();
+    msg.className='msg ok'; msg.textContent='Bought ' + qty + ' share' + (qty===1?'':'s') + ' of ' + symbol + ' at ' + fmtMoney(price) + '.';
+  }catch(err){ msg.className='msg err'; msg.textContent='Stock purchase failed: ' + err.message; }
+}
+async function sellStock(symbol, sellQty){
+  const pos = state.positions.find(p => p.type==='stock' && p.status==='open' && p.symbol===symbol);
+  if(!pos) return;
+  sellQty = Math.floor(Number(sellQty));
+  if(!sellQty || sellQty<1) return;
+  if(sellQty > pos.qty) { alert('You only own ' + pos.qty + ' share' + (pos.qty===1?'':'s') + ' of ' + symbol + '.'); return; }
+  const price = currentPrice(symbol);
+  if(price==null) return;
+  const proceeds = Math.round(price*sellQty*100)/100;
+  const pnl = Math.round((price - Number(pos.avgCost||0))*sellQty*100)/100;
+  if(!confirm('Sell ' + sellQty + 'x ' + symbol + ' at ' + fmtMoney(price) + ' for ' + fmtMoney(proceeds) + '?')) return;
+  try{
+    const ref = doc(db,'users',state.uid,'positions',pos.id);
+    const userRef = doc(db,'users',state.uid);
+    const remaining = pos.qty - sellQty;
+    const batch = writeBatch(db);
+    if(remaining > 0){
+      batch.update(ref, { qty: remaining, lastSellPrice: price, lastSellDay: state.day, cashDelta: proceeds, realizedDelta: pnl });
+    } else {
+      batch.update(ref, { qty: 0, status:'sold', sellPrice: price, sellDay: state.day, payoff: proceeds, realizedPnl: pnl, dismissed:false, cashDelta: proceeds, realizedDelta: pnl });
+    }
+    batch.update(userRef, { cash: state.cash + proceeds, realized: state.realized + pnl, lastTradeId: pos.id });
+    await batch.commit();
+    renderAssets(); renderStats();
+  }catch(err){ alert('Could not sell stock: ' + err.message); }
+}
+function renderAssets(){
+  const sel = document.getElementById('assetSymbol');
+  if(!sel) return;
+  const symbols = Object.keys(state.players).sort();
+  const prev = state.assetSymbol || sel.value;
+  sel.innerHTML = '<option value="">— select a stock —</option>' + symbols.map(s=>'<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+' — '+fmtMoney(currentPrice(s))+'</option>').join('');
+  if(symbols.includes(prev)){ sel.value=prev; state.assetSymbol=prev; }
+  else { sel.value=''; state.assetSymbol=''; }
+  renderAssetPreview();
+  const body = document.getElementById('assetsBody');
+  const holdings = getStockPositions().sort((a,b)=>a.symbol.localeCompare(b.symbol));
+  const totalShares = holdings.reduce((s,p)=>s+p.qty,0);
+  document.getElementById('assetSub').textContent = totalShares + ' share' + (totalShares===1?'':'s');
+  if(!holdings.length){ body.innerHTML='<div class="empty-state">No stock holdings yet.</div>'; return; }
+  body.innerHTML = holdings.map(pos => {
+    const price=currentPrice(pos.symbol)||0, value=price*pos.qty, cost=Number(pos.avgCost||0)*pos.qty, pnl=value-cost, pnlPct=cost?((pnl/cost)*100):0;
+    return '<div class="pos-card">'
+      + '<div class="top"><span class="kind">STOCK</span><span class="sym">'+escapeHtml(pos.symbol)+'</span><span class="tag open">OWNED · '+pos.qty+'</span></div>'
+      + '<div class="detail"><span>Market price</span><b>'+fmtMoney(price)+'</b></div>'
+      + '<div class="detail"><span>Average cost</span><b>'+fmtMoney(pos.avgCost)+'</b></div>'
+      + '<div class="detail"><span>Market value</span><b>'+fmtMoney(value)+'</b></div>'
+      + '<div class="detail"><span>Unrealized P&amp;L</span><b style="color:'+(pnl>=0?'var(--phosphor)':'var(--red)')+'">'+(pnl>=0?'+':'')+fmtMoney(pnl)+' ('+(pnlPct>=0?'+':'')+pnlPct.toFixed(1)+'%)</b></div>'
+      + '<div style="margin-top:8px; display:flex; gap:6px; align-items:center; justify-content:flex-end;">'
+      + '<input type="number" min="1" max="'+pos.qty+'" step="1" value="'+pos.qty+'" data-sellqty="'+escapeHtml(pos.symbol)+'" style="width:82px; background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:4px 6px; font-family:var(--mono);">'
+      + '<button class="close-btn" data-sellid="'+escapeHtml(pos.symbol)+'">Sell</button></div>'
+      + '</div>';
+  }).join('');
+  body.querySelectorAll('[data-sellid]').forEach(btn => btn.addEventListener('click', () => {
+    const input = Array.from(body.querySelectorAll('[data-sellqty]')).find(el => el.dataset.sellqty===btn.dataset.sellid);
+    sellStock(btn.dataset.sellid, input ? input.value : 1);
+  }));
+}
+
+function renderPositions(){
+  const body = document.getElementById('positionsBody');
+  const visible = state.positions.filter(p => p.type!=='stock' && (p.status==='open' || !p.dismissed));
+  const open = state.positions.filter(p=>p.type!=='stock' && p.status==='open');
+  const shares = getStockPositions().reduce((sum,p)=>sum+Number(p.qty||0),0);
+  document.getElementById('posSub').textContent = open.length + ' derivative' + (open.length===1?'':'s') + ' · ' + shares + ' share' + (shares===1?'':'s');
+  if(visible.length===0){ body.innerHTML = '<div class="empty-state">No derivative contracts yet. Stock holdings live under Assets.</div>'; return; }
+  const sorted = [...visible].sort((a,b) => (b.boughtDay - a.boughtDay));
+  body.innerHTML = sorted.map(renderPositionCard).join('');
+  body.querySelectorAll('[data-dismissid]').forEach(btn => btn.addEventListener('click', () => dismissPosition(btn.dataset.dismissid)));
+  body.querySelectorAll('[data-closeid]').forEach(btn => btn.addEventListener('click', () => closePositionEarly(btn.dataset.closeid)));
+}
+
+function renderPositionCard(pos){
+  const price = currentPrice(pos.symbol) || 0;
+  const kindLabel = pos.type==='swap' ? 'Elimination Swap' : (pos.type==='put'?'Put':'Call');
+  if(pos.status === 'open'){
+    const daysLeft = pos.expiryDay - state.day;
+    let mainLine, markValue, closeValue;
+    if(pos.type === 'swap'){
+      mainLine = 'Trigger: deaths >= ' + pos.threshold + ' · Notional ' + fmtMoney(pos.notional);
+      markValue = 0;
+      const remaining = Math.max(1, pos.expiryDay - state.day);
+      closeValue = computeSwapPremium(pos.symbol, pos.threshold, pos.notional, remaining).premium * pos.qty;
+    } else {
+      markValue = pos.type==='put' ? Math.max(0,pos.strike-price)*pos.qty : Math.max(0,price-pos.strike)*pos.qty;
+      mainLine = 'Strike ' + fmtMoney(pos.strike) + ' · Current ' + fmtMoney(price);
+      closeValue = markValue;
+    }
+    return '<div class="pos-card">'
+      + '<div class="top"><span class="kind">' + kindLabel + '</span><span class="sym">' + escapeHtml(pos.symbol) + '</span><span class="tag open">OPEN · ' + (daysLeft<=0?'settles next tick':daysLeft+' day'+(daysLeft!==1?'s':'')+' left') + '</span></div>'
+      + '<div class="detail"><span>' + mainLine + '</span></div>'
+      + '<div class="detail"><span>Contracts</span><b>' + pos.qty + '</b></div>'
+      + '<div class="detail"><span>Premium paid</span><b>' + fmtMoney(pos.premium*pos.qty) + '</b></div>'
+      + (pos.type!=='swap' ? ('<div class="detail"><span>Mark-to-market</span><b>' + fmtMoney(markValue) + '</b></div>') : '')
+      + '<div class="detail"><span>Close now for</span><b>' + fmtMoney(closeValue) + '</b></div>'
+      + '<div style="margin-top:8px; text-align:right;"><button class="close-btn" data-closeid="' + pos.id + '">Close position</button></div>'
+      + '</div>';
+  } else {
+    const cls = pos.status==='won' ? 'settled-win' : 'settled-loss';
+    const netPl = pos.payoff - (pos.premium*pos.qty);
+    return '<div class="pos-card ' + cls + '">'
+      + '<div class="top"><span class="kind">' + kindLabel + '</span><span class="sym">' + escapeHtml(pos.symbol) + '</span><span class="tag ' + (pos.status==='won'?'win':'loss') + '">' + (pos.status==='won'?'SETTLED — WON':'SETTLED — LOST') + (pos.closedEarly?' (CLOSED EARLY)':'') + '<button class="dismiss-btn" data-dismissid="' + pos.id + '">Dismiss</button></span></div>'
+      + '<div class="detail"><span>Settled at</span><b>' + fmtMoney(pos.settlePrice||0) + '</b></div>'
+      + '<div class="detail"><span>Payoff</span><b>' + fmtMoney(pos.payoff) + '</b></div>'
+      + '<div class="detail"><span>Net P&amp;L</span><b style="color:' + (netPl>=0?'var(--phosphor)':'var(--red)') + '">' + (netPl>=0?'+':'') + fmtMoney(netPl) + '</b></div>'
+      + '</div>';
+  }
+}
+
+function renderHistory(){
+  const settled = state.positions.filter(p=>p.type!=='stock' && p.status!=='open');
+  const filtered = settled.filter(p => state.historyFilter==='all' ? true : (state.historyFilter==='won'?p.status==='won':p.status==='lost'));
+  const sorted = [...filtered].sort((a,b) => b.expiryDay - a.expiryDay);
+  const wins = settled.filter(p=>p.status==='won').length, losses = settled.filter(p=>p.status==='lost').length;
+  const totalRealized = settled.reduce((sum,p)=>sum+(p.payoff-p.premium*p.qty),0);
+  const winRate = settled.length ? (wins/settled.length*100) : 0;
+
+  document.getElementById('historyStats').innerHTML =
+    '<div class="stat"><div class="label">CONTRACTS SETTLED</div><div class="value">' + settled.length + '</div></div>'
+    + '<div class="stat"><div class="label">WIN RATE</div><div class="value">' + winRate.toFixed(0) + '% <span style="font-size:12px;color:var(--text-dim)">(' + wins + 'W / ' + losses + 'L)</span></div></div>'
+    + '<div class="stat"><div class="label">TOTAL REALIZED P&amp;L</div><div class="value" style="color:' + (totalRealized>=0?'var(--phosphor)':'var(--red)') + '">' + (totalRealized>=0?'+':'') + fmtMoney(totalRealized) + '</div></div>';
+
+  const body = document.getElementById('historyBody');
+  if(sorted.length===0){ body.innerHTML = '<tr><td colspan="11" class="empty-state">No settled contracts' + (state.historyFilter!=='all'?' matching this filter':' yet') + '.</td></tr>'; return; }
+  body.innerHTML = sorted.map(pos => {
+    const netPl = pos.payoff - (pos.premium*pos.qty);
+    const kindLabel = pos.type==='swap'?'Swap':(pos.type==='put'?'Put':'Call');
+    const strikeCol = pos.type==='swap' ? ('deaths>=' + pos.threshold) : fmtMoney(pos.strike);
+    return '<tr>'
+      + '<td>' + kindLabel + '</td><td class="sym">' + escapeHtml(pos.symbol) + '</td><td>' + strikeCol + '</td>'
+      + '<td>Day ' + pos.boughtDay + '</td><td>Day ' + pos.expiryDay + '</td><td>' + fmtMoney(pos.settlePrice||0) + '</td>'
+      + '<td>' + pos.qty + '</td><td>' + fmtMoney(pos.premium*pos.qty) + '</td><td>' + fmtMoney(pos.payoff) + '</td>'
+      + '<td class="' + (netPl>=0?'win-text':'loss-text') + '">' + (netPl>=0?'+':'') + fmtMoney(netPl) + '</td>'
+      + '<td class="' + (pos.status==='won'?'win-text':'loss-text') + '">' + (pos.status==='won'?'WON':'LOST') + (pos.closedEarly?' (early)':'') + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function computeOpenValue(positions){
+  return positions.filter(p=>p.status==='open').reduce((sum,pos) => {
+    if(pos.type==='stock') return sum + (currentPrice(pos.symbol)||0) * pos.qty;
+    if(pos.type==='swap') return sum;
+    const price = currentPrice(pos.symbol) || 0;
+    return sum + (pos.type==='put' ? Math.max(0,pos.strike-price) : Math.max(0,price-pos.strike)) * pos.qty;
+  }, 0);
+}
+
+function renderStats(){
+  document.getElementById('statCash').textContent = fmtMoney(state.cash);
+  const openVal = computeOpenValue(state.positions);
+  document.getElementById('statOpenVal').textContent = fmtMoney(openVal);
+  const realizedEl = document.getElementById('statRealized');
+  realizedEl.textContent = (state.realized>=0?'+':'') + fmtMoney(state.realized);
+  realizedEl.className = 'value ' + (state.realized>0?'up':state.realized<0?'down':'');
+  document.getElementById('statNet').textContent = fmtMoney(state.cash + openVal);
+}
+
+function renderAll(){
+  renderTicker(); renderPremiumPreview(); renderPositions(); renderAssets(); renderHistory(); renderStats(); renderChart(); renderEloTab();
+}
+
+function renderEloTab(){
+  const summaryEl = document.getElementById('eloSummary');
+  const bodyEl = document.getElementById('eloBody');
+  if(!summaryEl || !bodyEl) return;
+  const entries = Object.keys(state.elo).map(name => Object.assign({ name }, state.elo[name]));
+  entries.sort((a,b) => b.elo - a.elo);
+  if(entries.length === 0){
+    summaryEl.innerHTML = '';
+    bodyEl.innerHTML = '<tr><td colspan="6" class="empty-state">No battles recorded yet.</td></tr>';
+    if(eloChart){ eloChart.destroy(); eloChart = null; }
+    return;
+  }
+  const avg = entries.reduce((s,e)=>s+e.elo,0)/entries.length;
+  summaryEl.innerHTML =
+    '<div class="stat"><div class="label">PLAYERS TRACKED</div><div class="value">' + entries.length + '</div></div>'
+    + '<div class="stat"><div class="label">HIGHEST</div><div class="value elo-pos">' + escapeHtml(entries[0].name) + ' · ' + Math.round(entries[0].elo) + '</div></div>'
+    + '<div class="stat"><div class="label">LOWEST</div><div class="value elo-neg">' + escapeHtml(entries[entries.length-1].name) + ' · ' + Math.round(entries[entries.length-1].elo) + '</div></div>'
+    + '<div class="stat"><div class="label">AVERAGE</div><div class="value">' + Math.round(avg) + '</div></div>';
+
+  bodyEl.innerHTML = buildEloBodyHtml(entries);
+
+  renderEloChart(entries);
+}
+
+let expandedEloPlayer = null;
+function buildEloBodyHtml(entries){
+  return entries.map((e,i) => {
+    const row = '<tr><td>' + (i+1) + '</td><td class="sym player-link" data-player="' + escapeHtml(e.name) + '">' + escapeHtml(e.name) + '</td>'
+      + '<td><span class="cls-pill" style="color:' + classColor(e.profession) + '">' + escapeHtml(e.profession||'Unknown') + '</span></td>'
+      + '<td class="' + (e.elo>=ELO_START?'elo-pos':'elo-neg') + '">' + Math.round(e.elo) + '</td>'
+      + '<td>' + (e.wins||0) + '-' + (e.losses||0) + '-' + (e.draws||0) + '</td>'
+      + '<td>' + e.battles + '</td></tr>';
+    if(e.name !== expandedEloPlayer) return row;
+    return row + '<tr class="class-expand-row"><td colspan="6">' + renderClassBreakdownHtml(e.name) + '</td></tr>';
+  }).join('');
+}
+
+// Toggles the inline class-breakdown row under a player's own row — no
+// overlay, nothing else on the page dims. Re-renders just the table body,
+// not the chart, so this stays cheap even with 800+ rows.
+function toggleEloPlayer(name){
+  expandedEloPlayer = (expandedEloPlayer === name) ? null : name;
+  const bodyEl = document.getElementById('eloBody');
+  if(!bodyEl) return;
+  const entries = Object.keys(state.elo).map(n => Object.assign({ name: n }, state.elo[n])).sort((a,b)=>b.elo-a.elo);
+  bodyEl.innerHTML = buildEloBodyHtml(entries);
+  if(expandedEloPlayer){
+    const row = bodyEl.querySelector('.class-expand-row');
+    if(row) row.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }
+}
+
+let eloChart = null;
+function renderEloChart(entries){
+  const canvas = document.getElementById('eloChart');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const sorted = [...entries].sort((a,b)=>b.elo-a.elo);
+  const labels = sorted.map(e=>e.name);
+  const data = sorted.map(e=>Math.round(e.elo));
+  const colors = data.map(v => v>=ELO_START ? '#4dff9e' : '#ff5d5d');
+  if(eloChart) eloChart.destroy();
+  eloChart = new Chart(ctx, {
+    type:'bar',
+    data:{ labels, datasets:[{ label:'Elo', data, backgroundColor: colors }] },
+    options:{
+      responsive:true,
+      onClick:(evt, elements) => {
+        if(elements && elements.length){
+          const bar = sorted[elements[0].index];
+          if(bar) toggleEloPlayer(bar.name);
+        }
+      },
+      onHover:(evt, elements) => { evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ ticks:{ color:'#7fa08c' }, grid:{ color:'#1b271f' } },
+        y:{ ticks:{ color:'#7fa08c' }, grid:{ color:'#1b271f' } }
+      }
+    }
+  });
+}
+
+// Every report a player appears in is already stashed on players[name].history
+// as it's parsed (see recomputeMarket), profession included per row — so the
+// full class history across all 1500+ exports needs no new tracking, just a
+// read of what's already there. Groups by normalized profession (so casing/
+// whitespace variants from OCR don't fork into separate rows) but displays
+// whichever raw spelling was most common for that class.
+function classesForPlayer(name){
+  const p = state.players[name];
+  if(!p || !p.history || !p.history.length) return null;
+  const groups = {};
+  let firstDay = Infinity, lastDay = -Infinity;
+  p.history.forEach(h => {
+    const raw = h.profession || 'Unknown';
+    const key = normProf(raw);
+    if(!groups[key]) groups[key] = { count: 0, labelCounts: {} };
+    groups[key].count += 1;
+    groups[key].labelCounts[raw] = (groups[key].labelCounts[raw]||0) + 1;
+    if(h.day < firstDay) firstDay = h.day;
+    if(h.day > lastDay) lastDay = h.day;
+  });
+  const classes = Object.keys(groups).map(key => {
+    const g = groups[key];
+    const bestLabel = Object.keys(g.labelCounts).sort((a,b)=>g.labelCounts[b]-g.labelCounts[a])[0];
+    return { cls: bestLabel, count: g.count };
+  }).sort((a,b)=>b.count-a.count);
+  return { classes, battles: p.history.length, firstDay, lastDay };
+}
+
+// Returns the HTML for the inline panel that expands directly under a
+// player's row — no modal, nothing else on the page dims.
+function renderClassBreakdownHtml(name){
+  const info = classesForPlayer(name);
+  if(!info || !info.classes.length){
+    return '<div class="class-expand"><div class="empty-state">No report history found for this name.</div></div>';
+  }
+  const range = info.firstDay===info.lastDay ? ('Day '+info.firstDay) : ('Day '+info.firstDay+' – Day '+info.lastDay);
+  return '<div class="class-expand">'
+    + '<div class="class-expand-meta">' + info.battles + ' report' + (info.battles!==1?'s':'') + ' · ' + range
+    + (info.classes.length>1 ? ' · ' + info.classes.length + ' classes played' : '') + '</div>'
+    + info.classes.map(c =>
+        '<div class="class-row"><span class="cls-pill" style="color:' + classColor(c.cls) + '">' + escapeHtml(c.cls) + '</span><span class="count">' + c.count + ' report' + (c.count!==1?'s':'') + '</span></div>'
+      ).join('')
+    + '</div>';
+}
+
+async function renderNetworthTab(){
+  const summaryEl = document.getElementById('networthSummary');
+  const bodyEl = document.getElementById('networthBody');
+  if(!summaryEl || !bodyEl) return;
+  bodyEl.innerHTML = '<tr><td colspan="6" class="empty-state">Loading traders…</td></tr>';
+  let snap;
+  try{
+    snap = await getDocs(collection(db, 'users'));
+  }catch(e){
+    bodyEl.innerHTML = '<tr><td colspan="6" class="empty-state">Could not load trader list.</td></tr>';
+    return;
+  }
+  const base = [];
+  snap.forEach(d => {
+    const u = d.data();
+    base.push({
+      uid: d.id,
+      username: u.username || '(unnamed)',
+      cash: typeof u.cash === 'number' ? u.cash : 0,
+      realized: typeof u.realized === 'number' ? u.realized : 0,
+      createdAt: u.createdAt
+    });
+  });
+  if(base.length === 0){
+    summaryEl.innerHTML = '';
+    bodyEl.innerHTML = '<tr><td colspan="6" class="empty-state">No traders have signed up yet.</td></tr>';
+    return;
+  }
+
+  // Pull every trader's open positions in parallel and price them with the
+  // same live market prices used for your own portfolio, so "open value"
+  // means the same thing for everyone on the board.
+  const traders = await Promise.all(base.map(async t => {
+    let openVal = 0;
+    try{
+      const posSnap = await getDocs(collection(db, 'users', t.uid, 'positions'));
+      const positions = [];
+      posSnap.forEach(p => positions.push(p.data()));
+      openVal = computeOpenValue(positions);
+    }catch(e){
+      // If a positions read ever fails for one trader, don't blow up the
+      // whole board — just show that trader's cash-only figure.
+    }
+    return Object.assign({}, t, { openVal, netWorth: t.cash + openVal });
+  }));
+
+  traders.sort((a,b) => b.netWorth - a.netWorth);
+  const totalNet = traders.reduce((s,t)=>s+t.netWorth,0);
+  const avgNet = totalNet / traders.length;
+  summaryEl.innerHTML =
+    '<div class="stat"><div class="label">TRADERS</div><div class="value">' + traders.length + '</div></div>'
+    + '<div class="stat"><div class="label">RICHEST</div><div class="value elo-pos">' + escapeHtml(traders[0].username) + ' · ' + fmtMoney(traders[0].netWorth) + '</div></div>'
+    + '<div class="stat"><div class="label">POOREST</div><div class="value elo-neg">' + escapeHtml(traders[traders.length-1].username) + ' · ' + fmtMoney(traders[traders.length-1].netWorth) + '</div></div>'
+    + '<div class="stat"><div class="label">AVERAGE NET WORTH</div><div class="value">' + fmtMoney(avgNet) + '</div></div>';
+
+  bodyEl.innerHTML = traders.map((t,i) => {
+    const isYou = t.uid === state.uid;
+    return '<tr' + (isYou ? ' style="background:var(--panel-2); font-weight:bold;"' : '') + '>'
+      + '<td>' + (i+1) + '</td>'
+      + '<td class="sym">' + escapeHtml(t.username) + (isYou ? ' <span style="color:var(--text-dim); font-weight:normal;">(you)</span>' : '') + '</td>'
+      + '<td>' + fmtMoney(t.cash) + '</td>'
+      + '<td>' + fmtMoney(t.openVal) + '</td>'
+      + '<td>' + fmtMoney(t.netWorth) + '</td>'
+      + '<td class="' + (t.realized>=0?'win-text':'loss-text') + '">' + (t.realized>=0?'+':'') + fmtMoney(t.realized) + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+
+/* ---------- Image -> standard BATTLEFIELD_OVER.html converter ---------- */
+
+const imageDropzone = document.getElementById('imageDropzone');
+const imageInput = document.getElementById('imageInput');
+const ocrStatus = document.getElementById('ocrStatus');
+const ocrProgress = document.getElementById('ocrProgress');
+const ocrProgressBar = document.getElementById('ocrProgressBar');
+const downloadConvertedHtml = document.getElementById('downloadConvertedHtml');
+const uploadConvertedHtml = document.getElementById('uploadConvertedHtml');
+
+let convertedReportHtml = '';
+let convertedReportFile = null;
+
+function setOcrStatus(message, type=''){
+  ocrStatus.className = 'ocr-status' + (type ? ' ' + type : '');
+  ocrStatus.textContent = message;
+}
+
+function htmlEscape(value){
+  return String(value ?? '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+function cleanOcrNumber(value){
+  // OCR commonly turns commas into spaces and occasionally inserts punctuation.
+  const cleaned = String(value ?? '').replace(/[\s,]/g,'').replace(/[Oo]/g,'0').replace(/[Il]/g,'1');
+  const n = parseFloat(cleaned.replace(/[^0-9.-]/g,''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function factionColor(faction){
+  return /imperial/i.test(faction) ? '#4169E1' :
+         /rebel/i.test(faction) ? '#D93311' : '#FFFFFF';
+}
+
+function buildStandardBattleReportHtml(players, title='BATTLEFIELD OVER'){
+  const headers = [
+    'Name','Profession','Faction','Kills','Assists','Deaths','Damage',
+    'Largest Performed Hit','Damage Taken','Healing','Largest Heal','Captures'
+  ];
+
+  const rows = players.map((p, index) => {
+    const bg = index % 2 === 0 ? '#FFFFFF' : '#CCCCCC';
+    const fc = factionColor(p.faction);
+    return `<tr>
+<td bgcolor="${bg}"><font color="${fc}">${htmlEscape(p.name)}</font></td>
+<td bgcolor="${bg}">${htmlEscape(p.profession)}</td>
+<td bgcolor="${bg}"><font color="${fc}">${htmlEscape(p.faction)}</font></td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.kills)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.assists)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.deaths)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.damage)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.largestHit)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.damageTaken)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.healing)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.largestHeal)}</td>
+<td bgcolor="${bg}">${cleanOcrNumber(p.captures)}</td>
+</tr>`;
+  }).join('\n');
+
+  return `<!DOCTYPE html>
 <html>
-	<head>
-		<title>Battlefield Exchange</title>
-		<style>
-			body {
-				background-image: url('./background.png');
-				background-repeat: no-repeat;
-				background-position: center center;
-				background-size: cover;
-				background-attachment: fixed;
-				margin: 0;
-				min-height: 100vh;
-				display: flex;
-				flex-direction: column;
-				justify-content: center;
-				align-items: center;
-				color: #ffffff;
-				font-family: 'Arial Black', sans-serif;
-				text-align: center;
-				text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.7);
-			}
+<head>
+<title>${htmlEscape(title)}</title>
+</head>
+<body><center>
+<table border="1">
+<tr>
+${headers.map(h => `<th>${h}</th>`).join('\n')}
+</tr>
+${rows}
+</table>
+</center></body>
+</html>`;
+}
 
-			h1 {
-				font-size: 4rem; 
-				margin-bottom: 10px;
-				text-transform: uppercase;
-				letter-spacing: 2px;
-			}
+/*
+ * Tesseract TSV gives each recognized word its bounding box.
+ * We locate the header row, use its X positions as the table's column
+ * anchors, then group subsequent OCR words by their Y/line position.
+ */
+function parseBattleReportFromTsv(data){
+  const words = (data.words || [])
+    .filter(w => (w.text || '').trim() && (w.conf == null || w.conf >= 20))
+    .map(w => ({
+      text: w.text.trim(),
+      x: w.bbox.x0,
+      x2: w.bbox.x1,
+      y: w.bbox.y0,
+      y2: w.bbox.y1,
+      line: `${w.block_num}:${w.par_num}:${w.line_num}`
+    }));
 
-			p {
-				font-size: 2rem;
-				margin-top: 0;
-				color: #ff4a4a;
-			}
-		</style>
-	</head>
-	<body>
-		<h1>Under Maintenance</h1>
-		<p>GRRRR</p>
-	</body>
+  if(!words.length) throw new Error('OCR did not find any readable text.');
+
+  const required = [
+    'name','profession','faction','kills','assists','deaths','damage',
+    'largest','performed','hit','damage','taken','healing','largest','heal','captures'
+  ];
+
+  // Find the line containing the most known header words.
+  const lineGroups = new Map();
+  for(const w of words){
+    if(!lineGroups.has(w.line)) lineGroups.set(w.line, []);
+    lineGroups.get(w.line).push(w);
+  }
+
+  let header = null;
+  let bestScore = 0;
+  for(const lineWords of lineGroups.values()){
+    const normalized = lineWords.map(w => w.text.toLowerCase().replace(/[^a-z]/g,''));
+    const score = normalized.filter(v =>
+      ['name','profession','faction','kills','assists','deaths','damage','largest','performed','hit','taken','healing','heal','captures'].includes(v)
+    ).length;
+    if(score > bestScore){
+      bestScore = score;
+      header = lineWords.sort((a,b)=>a.x-b.x);
+    }
+  }
+
+  if(!header || bestScore < 7){
+    throw new Error('Could not locate the battle-report table headers. Use a clear screenshot containing the full table.');
+  }
+
+  // Known header sequence; locate the first word of each column.
+  const headerNames = [
+    'name','profession','faction','kills','assists','deaths','damage',
+    'largest','damage','healing','largest','captures'
+  ];
+  const anchors = [];
+  let searchFrom = 0;
+
+  for(const target of headerNames){
+    let found = -1;
+    for(let i=searchFrom;i<header.length;i++){
+      const n = header[i].text.toLowerCase().replace(/[^a-z]/g,'');
+      if(n === target || (target === 'largest' && n.startsWith('largest'))){
+        found = i;
+        break;
+      }
+    }
+    if(found >= 0){
+      anchors.push(header[found].x);
+      searchFrom = found + 1;
+    } else {
+      anchors.push(null);
+    }
+  }
+
+  // The two "largest" columns and the second "damage" can be disambiguated
+  // by their position. Fill missing anchors from evenly spaced header centers.
+  const validAnchors = anchors.filter(x => x != null);
+  if(validAnchors.length < 7) throw new Error('Could not determine the report columns.');
+
+  // Build column boundaries from header anchor positions. Missing anchors
+  // are interpolated between neighboring known anchors.
+  for(let i=0;i<anchors.length;i++){
+    if(anchors[i] != null) continue;
+    let left = i-1;
+    while(left >= 0 && anchors[left] == null) left--;
+    let right = i+1;
+    while(right < anchors.length && anchors[right] == null) right++;
+    if(left >= 0 && right < anchors.length){
+      anchors[i] = anchors[left] + (anchors[right]-anchors[left]) * ((i-left)/(right-left));
+    }
+  }
+
+  // For the two ambiguous "damage" header positions, the sequential search
+  // above normally resolves them correctly. Ensure monotonicity.
+  for(let i=1;i<anchors.length;i++){
+    if(anchors[i] == null) anchors[i] = anchors[i-1] + 1;
+  }
+
+  const rows = [];
+  const sortedLines = [...lineGroups.values()]
+    .map(ws => ws.sort((a,b)=>a.x-b.x))
+    .filter(ws => ws[0].y > Math.max(...header.map(w=>w.y2)) - 5)
+    .sort((a,b)=>a[0].y-b[0].y);
+
+  // Ignore the header line and collect lines beneath it. A player row is
+  // usually one OCR line; wrapped names are merged when their Y is close.
+  const headerBottom = Math.max(...header.map(w=>w.y2));
+  const dataLines = sortedLines.filter(ws => ws[0].y > headerBottom - 3);
+
+  function columnForX(x){
+    let best = 0;
+    let bestDist = Infinity;
+    for(let i=0;i<anchors.length;i++){
+      const d = Math.abs(x - anchors[i]);
+      if(d < bestDist){ bestDist = d; best = i; }
+    }
+    return best;
+  }
+
+  for(const ws of dataLines){
+    const cells = Array.from({length:12},()=>[]);
+    for(const w of ws){
+      const ci = columnForX(w.x);
+      cells[ci].push(w.text);
+    }
+    const values = cells.map(c=>c.join(' ').trim());
+
+    // A valid player row needs a name and at least several populated cells.
+    if(!values[0] || values.filter(Boolean).length < 5) continue;
+
+    // Header fragments occasionally appear as another line; skip them.
+    if(/^name$/i.test(values[0]) || /^profession$/i.test(values[0])) continue;
+
+    rows.push({
+      name: values[0],
+      profession: values[1] || 'Unknown',
+      faction: values[2] || 'Unknown',
+      kills: cleanOcrNumber(values[3]),
+      assists: cleanOcrNumber(values[4]),
+      deaths: cleanOcrNumber(values[5]),
+      damage: cleanOcrNumber(values[6]),
+      largestHit: cleanOcrNumber(values[7]),
+      damageTaken: cleanOcrNumber(values[8]),
+      healing: cleanOcrNumber(values[9]),
+      largestHeal: cleanOcrNumber(values[10]),
+      captures: cleanOcrNumber(values[11])
+    });
+  }
+
+  if(!rows.length) throw new Error('OCR found the table headers but could not extract any player rows.');
+  return rows;
+}
+
+async function convertImageToBattleHtml(file){
+  if(!window.Tesseract) throw new Error('OCR engine could not be loaded. Check your internet connection and reload the page.');
+
+  ocrProgress.style.display = 'block';
+  ocrProgressBar.style.width = '0%';
+  setOcrStatus('Loading OCR engine…');
+
+  const worker = await Tesseract.createWorker('eng', 1, {
+    logger: m => {
+      if(typeof m.progress === 'number'){
+        ocrProgressBar.style.width = Math.round(m.progress * 100) + '%';
+      }
+      if(m.status) setOcrStatus('OCR: ' + m.status + (m.progress ? ` ${Math.round(m.progress*100)}%` : ''));
+    }
+  });
+
+  try{
+    const { data } = await worker.recognize(file);
+    setOcrStatus('Reading battle-report table…');
+
+    const players = parseBattleReportFromTsv(data);
+    convertedReportHtml = buildStandardBattleReportHtml(players, 'BATTLEFIELD OVER');
+    convertedReportFile = new File(
+      [convertedReportHtml],
+      (file.name.replace(/\.[^.]+$/,'') || 'BATTLEFIELD_OVER') + '.html',
+      { type:'text/html' }
+    );
+
+    downloadConvertedHtml.disabled = false;
+    uploadConvertedHtml.disabled = false;
+    setOcrStatus(`Converted ${players.length} player${players.length===1?'':'s'} to standard BATTLEFIELD_OVER.html format.`, 'ok');
+    return convertedReportFile;
+  } finally {
+    await worker.terminate();
+    ocrProgress.style.display = 'none';
+  }
+}
+
+async function handleImageFile(file){
+  if(!file || !file.type.startsWith('image/')){
+    setOcrStatus('Please select an image file.', 'err');
+    return;
+  }
+  downloadConvertedHtml.disabled = true;
+  uploadConvertedHtml.disabled = true;
+  convertedReportHtml = '';
+  convertedReportFile = null;
+
+  try{
+    await convertImageToBattleHtml(file);
+  }catch(err){
+    setOcrStatus('Conversion failed: ' + (err.message || err), 'err');
+  }
+}
+
+imageDropzone.addEventListener('click', () => imageInput.click());
+imageInput.addEventListener('change', async e => {
+  await handleImageFile(e.target.files[0]);
+  imageInput.value = '';
+});
+
+['dragover','dragenter'].forEach(evt =>
+  imageDropzone.addEventListener(evt, e => {
+    e.preventDefault();
+    imageDropzone.classList.add('drag');
+  })
+);
+['dragleave','drop'].forEach(evt =>
+  imageDropzone.addEventListener(evt, e => {
+    e.preventDefault();
+    imageDropzone.classList.remove('drag');
+  })
+);
+imageDropzone.addEventListener('drop', async e => {
+  const file = e.dataTransfer.files[0];
+  await handleImageFile(file);
+});
+
+downloadConvertedHtml.addEventListener('click', () => {
+  if(!convertedReportHtml) return;
+  const blob = new Blob([convertedReportHtml], {type:'text/html'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = convertedReportFile?.name || 'BATTLEFIELD_OVER.html';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+uploadConvertedHtml.addEventListener('click', async () => {
+  if(!convertedReportFile) return;
+  uploadConvertedHtml.disabled = true;
+  setOcrStatus('Uploading converted report to the shared market…');
+  await handleUpload(convertedReportFile);
+  uploadConvertedHtml.disabled = false;
+  setOcrStatus('Converted report uploaded to the shared market.', 'ok');
+});
+
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+dropzone.addEventListener('click', () => fileInput.click());
+async function handleUploadBatch(fileList){
+  const files = Array.from(fileList || []).filter(f => /\.html?$/i.test(f.name));
+  if(!files.length) return;
+  for(const file of files) await handleUpload(file);
+}
+fileInput.addEventListener('change', async e => { await handleUploadBatch(e.target.files); fileInput.value=''; });
+['dragover','dragenter'].forEach(evt => dropzone.addEventListener(evt, e=>{e.preventDefault(); dropzone.classList.add('drag');}));
+['dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, e=>{e.preventDefault(); dropzone.classList.remove('drag');}));
+dropzone.addEventListener('drop', async e => { await handleUploadBatch(e.dataTransfer.files); });
+
+document.getElementById('optSymbol').addEventListener('change', () => { updateStrikeChain(); renderPremiumPreview(); });
+['optExpiry','optQty','swapThreshold','swapNotional'].forEach(id => document.getElementById(id).addEventListener('input', renderPremiumPreview));
+
+document.getElementById('optStrikeSelect').addEventListener('change', () => {
+  const sel = document.getElementById('optStrikeSelect');
+  const customField = document.getElementById('optStrikeCustomField');
+  if(sel.value === 'custom'){
+    customField.classList.remove('hidden');
+    document.getElementById('optStrike').value = document.getElementById('optStrikeCustom').value || '';
+  } else {
+    customField.classList.add('hidden');
+    document.getElementById('optStrike').value = sel.value;
+  }
+  renderPremiumPreview();
+});
+document.getElementById('optStrikeCustom').addEventListener('input', () => {
+  document.getElementById('optStrike').value = document.getElementById('optStrikeCustom').value;
+  renderPremiumPreview();
+});
+
+const navFloor = document.getElementById('navFloor'), navAssets = document.getElementById('navAssets'), navHistory = document.getElementById('navHistory'), navElo = document.getElementById('navElo'), navNetworth = document.getElementById('navNetworth');
+const viewFloor = document.getElementById('viewTradingFloor'), viewAssets = document.getElementById('viewAssets'), viewHistory = document.getElementById('viewHistory'), viewElo = document.getElementById('viewElo'), viewNetworth = document.getElementById('viewNetworth');
+function activateNav(activeNav, activeView){
+  [navFloor,navAssets,navHistory,navElo,navNetworth].forEach(b=>b.classList.remove('active'));
+  [viewFloor,viewAssets,viewHistory,viewElo,viewNetworth].forEach(v=>v.classList.add('hidden'));
+  activeNav.classList.add('active');
+  activeView.classList.remove('hidden');
+}
+navFloor.addEventListener('click', () => activateNav(navFloor, viewFloor));
+navAssets.addEventListener('click', () => { activateNav(navAssets, viewAssets); renderAssets(); });
+navHistory.addEventListener('click', () => { activateNav(navHistory, viewHistory); renderHistory(); });
+navElo.addEventListener('click', () => { activateNav(navElo, viewElo); renderEloTab(); });
+navNetworth.addEventListener('click', () => { activateNav(navNetworth, viewNetworth); renderNetworthTab(); });
+document.getElementById('assetSymbol').addEventListener('change', e => { state.assetSymbol=e.target.value; renderAssetPreview(); });
+document.getElementById('assetQty').addEventListener('input', renderAssetPreview);
+document.getElementById('assetBuyBtn').addEventListener('click', buyStock);
+document.getElementById('tickerSearch').addEventListener('input', e => {
+  state.tickerSearch = e.target.value;
+  renderTicker();
+});
+document.getElementById('historyFilters').querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
+  state.historyFilter = btn.dataset.filter;
+  document.getElementById('historyFilters').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderHistory();
+}));
+document.getElementById('eloBody').addEventListener('click', e => {
+  const link = e.target.closest('.player-link');
+  if(link) toggleEloPlayer(link.dataset.player);
+});
+</script>
+</body>
 </html>
