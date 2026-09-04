@@ -338,6 +338,17 @@
             <button class="debug-btn" id="dbgMigrateReports">Clean up duplicates &amp; lock in IDs</button>
           </div>
           <div id="dupeResults" style="margin-top:10px; font-size:12px; color:var(--text-dim); white-space:pre-line;"></div>
+
+          <div class="admin-note" style="margin-top:16px; border-color:var(--red);">Reset specific trader accounts — sets <b>cash back to $10,000</b> and <b>realized P&amp;L back to $0</b>, and deletes all open positions (stocks, options, and swaps all live in the same positions list, so this clears options too). The account itself, its username, and its login are <b>not</b> deleted — only for whichever traders you check below. Nothing is touched until you tick a box and confirm.</div>
+          <div class="debug-inline" style="margin-top:10px;">
+            <button class="debug-btn" id="dbgLoadUsers">Load trader accounts</button>
+            <button class="debug-btn" id="dbgSelectNone" disabled>Clear selection</button>
+          </div>
+          <div id="resetUserList" style="margin-top:10px; max-height:340px; overflow-y:auto;"></div>
+          <div class="debug-inline" style="margin-top:10px;">
+            <button class="debug-btn" id="dbgResetUsers" style="border-color:var(--red); color:var(--red);" disabled>Reset selected accounts (cash + clear positions)</button>
+          </div>
+          <div class="msg" id="resetStatus"></div>
         </div>
       </section>
 
@@ -681,7 +692,7 @@ function marginMultiplier(scoreA, scoreB, rowsA, rowsB){
 // percentile -> 1 (the very best, in a large enough population) price
 // approaches — but never quite reaches — top. Ordering still always
 // matches Elo ordering exactly, same guarantee as before.
-const DEFAULT_PRICE_SCALE = { median: 100, top: 100000 };
+const DEFAULT_PRICE_SCALE = { median: 100, top: 10000 };
 let PRICE_SCALE_SETTINGS = { ...DEFAULT_PRICE_SCALE };
 function priceFromPercentile(percentile){
   const ratio = PRICE_SCALE_SETTINGS.top / PRICE_SCALE_SETTINGS.median;
@@ -1490,6 +1501,165 @@ document.getElementById('dbgJumpBtn').addEventListener('click', async () => {
 });
 
 document.getElementById('dbgRecalc').addEventListener('click', recalculatePriceScale);
+
+// Manual account picker: nothing gets touched automatically. The data model
+// has no "last active" signal (users/{uid} only stores username, cash,
+// realized, createdAt — no last-login or last-trade timestamp), so rather
+// than guess at what counts as "old," this loads every trader with their
+// stats and lets the admin check exactly which ones to reset. A reset sets
+// cash back to 10000 and realized back to 0 on the existing account doc (the
+// doc itself, username, and login are untouched) and deletes every doc in
+// that trader's positions subcollection — stocks, options, and swaps are all
+// stored there, so clearing positions clears options too. Traders who are
+// currently online see it happen live, since their own onSnapshot listeners
+// are already subscribed to their user doc and positions collection.
+let resetCandidates = [];
+
+document.getElementById('dbgLoadUsers').addEventListener('click', async () => {
+  const listEl = document.getElementById('resetUserList');
+  const resetBtn = document.getElementById('dbgResetUsers');
+  const clearBtn = document.getElementById('dbgSelectNone');
+  const status = document.getElementById('resetStatus');
+
+  listEl.innerHTML = '<div class="empty-state">Loading trader accounts…</div>';
+  status.className = 'msg'; status.textContent = '';
+  resetBtn.disabled = true;
+  clearBtn.disabled = true;
+
+  let userDocs;
+  try{
+    userDocs = (await getDocs(collection(db, 'users'))).docs;
+  }catch(e){
+    listEl.innerHTML = '';
+    status.className = 'msg err';
+    status.textContent = 'Could not read the users collection: ' + (e.message || e);
+    return;
+  }
+
+  if(userDocs.length === 0){
+    listEl.innerHTML = '<div class="empty-state">No trader accounts found.</div>';
+    return;
+  }
+
+  resetCandidates = await Promise.all(userDocs.map(async uDoc => {
+    const u = uDoc.data();
+    let positions = [];
+    try{ positions = (await getDocs(collection(db, 'users', uDoc.id, 'positions'))).docs.map(p => p.data()); }
+    catch(e){ /* leave empty if the read fails; account is still listed, just priced at cash-only */ }
+    const cash = typeof u.cash === 'number' ? u.cash : 0;
+    const openVal = computeOpenValue(positions);
+    return {
+      uid: uDoc.id,
+      username: u.username || '(unnamed)',
+      cash,
+      realized: typeof u.realized === 'number' ? u.realized : 0,
+      createdAt: (u.createdAt && u.createdAt.toDate) ? u.createdAt.toDate() : null,
+      posCount: positions.length,
+      openVal,
+      netWorth: cash + openVal
+    };
+  }));
+
+  // Net worth first — that's the stat you're actually screening on.
+  resetCandidates.sort((a,b) => b.netWorth - a.netWorth);
+
+  listEl.innerHTML = '<table class="history"><thead><tr>'
+    + '<th></th><th>Trader</th><th>Net Worth</th><th>Cash</th><th>Realized</th><th>Open pos.</th><th>Signed up</th>'
+    + '</tr></thead><tbody>'
+    + resetCandidates.map(t => {
+        const isYou = t.uid === state.uid;
+        return '<tr>'
+          + '<td><input type="checkbox" class="reset-check" data-uid="' + t.uid + '"></td>'
+          + '<td>' + escapeHtml(t.username) + (isYou ? ' <span style="color:var(--text-dim); font-size:11px;">(you)</span>' : '') + '</td>'
+          + '<td style="font-weight:bold;">' + fmtMoney(t.netWorth) + '</td>'
+          + '<td>' + fmtMoney(t.cash) + '</td>'
+          + '<td>' + fmtMoney(t.realized) + '</td>'
+          + '<td>' + t.posCount + '</td>'
+          + '<td>' + (t.createdAt ? t.createdAt.toLocaleDateString() : '—') + '</td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table>';
+
+  clearBtn.disabled = false;
+  updateResetButtonState();
+});
+
+function updateResetButtonState(){
+  const anyChecked = document.querySelectorAll('.reset-check:checked').length > 0;
+  document.getElementById('dbgResetUsers').disabled = !anyChecked;
+}
+document.getElementById('resetUserList').addEventListener('change', e => {
+  if(e.target.classList.contains('reset-check')) updateResetButtonState();
+});
+document.getElementById('dbgSelectNone').addEventListener('click', () => {
+  document.querySelectorAll('.reset-check:checked').forEach(cb => cb.checked = false);
+  updateResetButtonState();
+});
+
+document.getElementById('dbgResetUsers').addEventListener('click', async () => {
+  const checkedUids = Array.from(document.querySelectorAll('.reset-check:checked')).map(cb => cb.dataset.uid);
+  const status = document.getElementById('resetStatus');
+  if(checkedUids.length === 0) return;
+
+  const names = checkedUids.map(uid => (resetCandidates.find(t => t.uid === uid) || {}).username || uid);
+  const ok = confirm(
+    'Reset ' + checkedUids.length + ' trader account(s) to $10,000 cash / $0 realized P&L, ' +
+    'and delete all of their open positions (stock/option/swap):\n\n'
+    + names.join(', ')
+    + '\n\nThe accounts themselves are kept — only balances and positions are cleared. This cannot be undone. Continue?'
+  );
+  if(!ok) return;
+
+  const btn = document.getElementById('dbgResetUsers');
+  btn.disabled = true;
+  status.className = 'msg';
+  status.textContent = 'Resetting…';
+
+  let batch = writeBatch(db);
+  let opsInBatch = 0;
+  let totalDocsTouched = 0;
+  let done = 0;
+
+  async function flush(){
+    if(opsInBatch > 0){
+      await batch.commit();
+      batch = writeBatch(db);
+      opsInBatch = 0;
+    }
+  }
+
+  try{
+    for(const uid of checkedUids){
+      let posDocs = [];
+      try{ posDocs = (await getDocs(collection(db, 'users', uid, 'positions'))).docs; }
+      catch(e){ /* still reset the account balance even if this read fails */ }
+      for(const pDoc of posDocs){
+        batch.delete(pDoc.ref);
+        opsInBatch++; totalDocsTouched++;
+        if(opsInBatch >= 400) await flush(); // stay well under Firestore's 500-op batch limit
+      }
+      batch.update(doc(db, 'users', uid), { cash: 10000, realized: 0 });
+      opsInBatch++; totalDocsTouched++;
+      if(opsInBatch >= 400) await flush();
+
+      done++;
+      status.textContent = 'Resetting… ' + done + ' / ' + checkedUids.length + ' accounts (' + totalDocsTouched + ' documents touched so far)';
+    }
+    await flush();
+  }catch(e){
+    status.className = 'msg err';
+    status.textContent = 'Stopped partway through (' + done + ' / ' + checkedUids.length + ' done): ' + (e.message || e) + '. Reload the list and try again — it will only act on whatever you check next time.';
+    btn.disabled = false;
+    return;
+  }
+
+  status.className = 'msg ok';
+  status.textContent = 'Done. Reset ' + done + ' account(s) to $10,000 / $0 realized and cleared their positions (' + totalDocsTouched + ' documents touched total).';
+  resetCandidates = [];
+  document.getElementById('resetUserList').innerHTML = '<div class="empty-state">List cleared — click "Load trader accounts" to refresh.</div>';
+  document.getElementById('dbgSelectNone').disabled = true;
+  renderNetworthTab();
+});
 
 async function deleteReport(reportId){
   if(!confirm('Delete this report from the shared market? Prices for everyone will recompute without it.')) return;
