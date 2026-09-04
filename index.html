@@ -319,10 +319,9 @@
             <input type="number" id="dbgJumpDay" min="0" step="1">
             <button class="debug-btn" id="dbgJumpBtn">Go</button>
           </div>
-          <div class="admin-note" style="margin-top:16px;">Price scale — changing these and hitting Recalculate reprices every stock for <b>every connected trader</b> immediately. Stock price is no longer its own formula: it's a direct read of each player's current Elo standing relative to everyone else that day (see the Elo Distribution tab) — no day-over-day compounding, no separate weight set to tune. These three numbers just set the dollar curve on top of that standing: the median player prices at "Median", and a player whose Elo sits "Std devs for top price" standard deviations above the field average prices at "Top price" — there's no hard ceiling above that, it's just rare to actually get there. Only visible/editable here, admin-only server-side too.</div>
+          <div class="admin-note" style="margin-top:16px;">Price scale — changing these and hitting Recalculate reprices every stock for <b>every connected trader</b> immediately. Stock price is a direct read of each player's current Elo <b>rank</b> that day (see the Elo Distribution tab) — no day-over-day compounding, no separate weight set to tune. The middle-ranked player prices at "Median"; the single top-ranked player's price approaches (but never quite reaches) "Top price" as more players are tracked. Because this is rank-based, not raw-Elo-based, it can't blow up no matter how large the actual Elo gap between players gets. Only visible/editable here, admin-only server-side too.</div>
           <div class="weight-row"><label>Median price</label><input type="number" step="1" id="pMedian" style="width:100%"><span></span></div>
           <div class="weight-row"><label>Top price</label><input type="number" step="1" id="pTop" style="width:100%"><span></span></div>
-          <div class="weight-row"><label>Std devs for top price</label><input type="number" step="0.1" id="pTargetZ" style="width:100%"><span></span></div>
           <button class="debug-btn" id="dbgRecalc">Recalculate &amp; broadcast to all clients</button>
           <div class="msg" id="wMsg"></div>
           <div class="debug-inline" style="margin-top:10px;">
@@ -519,36 +518,51 @@ const ELO_START = 1500, ELO_K = 32;
 // weightedComposite below) as before, but tuning one never moves the other.
 const ELO_WEIGHTS = { damage: 0.30, healing: 0.30, kills: 0.15, assists: 0.20, deaths: 0.30 };
 
-// STOCK PRICE MODEL — driven purely by each player's current Elo standing
-// relative to the whole population that same day. No history, no
-// compounding: a price on any given day is a pure function of (that
-// player's Elo that day, the mean/std of *everyone's* Elo that day) —
-// nothing here ever reads yesterday's price. Elo itself already reflects
-// the underlying skill/consistency signal (see ELO_WEIGHTS above); this is
-// just the dollar-value lens on top of it:
-//   z     = (playerElo - populationMeanElo) / populationStdElo
-//   price = medianPrice * e^(z * scale), where scale is picked so that a
-//           z-score of exactly targetZ lands on topPrice.
-// This guarantees, by construction, that price ordering always matches Elo
-// ordering exactly — a higher-Elo player can never price lower than a
-// lower-Elo one, unlike the old day-over-day % return model. The average
-// player prices near medianPrice, and there's no hard ceiling coded in: an
-// Elo z-score beyond targetZ just keeps riding the same exponential curve,
-// it's just rare in practice for anyone to actually get there.
-const DEFAULT_PRICE_SCALE = { median: 100, top: 100000, targetZ: 3 };
+// STOCK PRICE MODEL — driven purely by each player's current RANK in the
+// Elo standings that day. No history, no compounding: a price on any given
+// day is a pure function of (that player's rank among everyone that day) —
+// nothing here ever reads yesterday's price.
+//
+// This is deliberately RANK-based, not z-score-based. An earlier version
+// used (playerElo - meanElo) / stdElo directly, which blew up badly: real
+// Elo tails turned out to be far longer than a normal-ish distribution
+// would suggest (a genuinely dominant player who wins nearly every
+// head-to-head across hundreds of games can end up 5-7+ population std
+// devs out, not the ~3 assumed), and since that formula was a pure
+// exponential of z with no bound, several players independently landing
+// out past z=5 each produced prices in the tens of millions simultaneously.
+// Percentile rank fixes this structurally rather than by tuning constants:
+// percentile is mathematically confined to (0,1) no matter how extreme the
+// underlying Elo gap is, so the curve below can get arbitrarily close to
+// "top" for the single best player but can never exceed it, regardless of
+// whether that player's Elo edge is small or enormous.
+//   percentile = 1 - rank / (N + 1)   (N = players currently tracked;
+//                                       strictly between 0 and 1)
+//   price = median * (top/median) ^ (2 * (percentile - 0.5))
+// At percentile 0.5 (the middle of the pack) price == median. As
+// percentile -> 1 (the very best, in a large enough population) price
+// approaches — but never quite reaches — top. Ordering still always
+// matches Elo ordering exactly, same guarantee as before.
+const DEFAULT_PRICE_SCALE = { median: 100, top: 100000 };
 let PRICE_SCALE_SETTINGS = { ...DEFAULT_PRICE_SCALE };
-function priceScaleK(){
-  return Math.log(PRICE_SCALE_SETTINGS.top / PRICE_SCALE_SETTINGS.median) / PRICE_SCALE_SETTINGS.targetZ;
-}
-function priceFromElo(elo, mean, std){
-  const z = std ? (elo - mean) / std : 0;
-  const price = PRICE_SCALE_SETTINGS.median * Math.exp(z * priceScaleK());
+function priceFromPercentile(percentile){
+  const ratio = PRICE_SCALE_SETTINGS.top / PRICE_SCALE_SETTINGS.median;
+  const price = PRICE_SCALE_SETTINGS.median * Math.pow(ratio, 2 * (percentile - 0.5));
   return Math.round(price * 100) / 100;
 }
-function arrayMeanStd(vals){
-  const mean = vals.reduce((a,b)=>a+b,0) / vals.length;
-  const variance = vals.reduce((a,b)=>a+Math.pow(b-mean,2),0) / vals.length;
-  return { mean, std: Math.sqrt(variance) || 1 };
+// Ranks every currently-known player by Elo (best first) and returns a
+// name -> price map for that snapshot. Rank-based, so it only cares about
+// ORDER, never about how large the raw Elo gaps between players happen to be.
+function pricesFromEloSnapshot(ratings, allNames){
+  const sorted = [...allNames].sort((a,b) => ratings[b].elo - ratings[a].elo);
+  const N = sorted.length;
+  const prices = {};
+  sorted.forEach((name, i) => {
+    const rank = i + 1; // 1 = best
+    const percentile = 1 - rank / (N + 1);
+    prices[name] = priceFromPercentile(percentile);
+  });
+  return prices;
 }
 // Below this many same-profession peers in a single report, that profession's
 // own mean/std is too noisy to trust (e.g. a lone medic in a 40-player field)
@@ -835,8 +849,8 @@ async function subscribeToPriceWeights(){
 // client (including this one) picks it up instantly via the onSnapshot
 // above and re-prices the whole market with the new curve — no reload
 // needed. This no longer has a separate weight set of its own — price
-// rides directly on the Elo ladder (see ELO_WEIGHTS / recomputeMarket), so
-// the only things left to tune are the three curve knobs below.
+// rides directly on Elo rank (see ELO_WEIGHTS / recomputeMarket), so the
+// only things left to tune are the two curve knobs below.
 async function recalculatePriceScale(){
   if(!state.isAdmin) return;
   const read = (id, fallback) => {
@@ -844,9 +858,8 @@ async function recalculatePriceScale(){
     return isNaN(v) ? fallback : v;
   };
   const settings = {
-    median:  read('pMedian',  PRICE_SCALE_SETTINGS.median),
-    top:     read('pTop',     PRICE_SCALE_SETTINGS.top),
-    targetZ: read('pTargetZ', PRICE_SCALE_SETTINGS.targetZ),
+    median: read('pMedian', PRICE_SCALE_SETTINGS.median),
+    top:    read('pTop',    PRICE_SCALE_SETTINGS.top),
   };
   const msg = document.getElementById('wMsg');
   try{
@@ -859,7 +872,7 @@ async function recalculatePriceScale(){
 
 function populateWeightInputsIfIdle(){
   // Don't stomp on values the admin is mid-typing.
-  const map = { pMedian: 'median', pTop: 'top', pTargetZ: 'targetZ' };
+  const map = { pMedian: 'median', pTop: 'top' };
   Object.keys(map).forEach(id => {
     const el = document.getElementById(id);
     if(el && document.activeElement !== el) el.value = PRICE_SCALE_SETTINGS[map[id]];
@@ -1053,14 +1066,13 @@ function recomputeMarket(){
       rows.forEach(r => { ratings[r.name].elo += deltas[r.name]; ratings[r.name].battles += 1; });
     }
 
-    // Re-price EVERYONE known so far off today's Elo distribution — including
-    // players who sat this report out, since their standing still shifts
+    // Re-price EVERYONE known so far off today's Elo RANKING — including
+    // players who sat this report out, since their rank still shifts
     // relative to everyone else's. No dependence on yesterday's price.
     const allNames = Object.keys(ratings);
-    const { mean, std } = arrayMeanStd(allNames.map(name => ratings[name].elo));
+    const todaysPrices = pricesFromEloSnapshot(ratings, allNames);
     allNames.forEach(name => {
-      const price = priceFromElo(ratings[name].elo, mean, std);
-      players[name].priceHistory.push({ day: rep.day, price });
+      players[name].priceHistory.push({ day: rep.day, price: todaysPrices[name] });
     });
   });
 
