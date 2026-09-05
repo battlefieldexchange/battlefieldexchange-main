@@ -1051,6 +1051,7 @@ async function subscribeToMarket(){
   // manual edit straight in the Firebase console — so we throw the cache
   // away and fall back to one full resync instead of trusting stale data.
   async function verifyAgainstServer(){
+    if(byId.size === 0) return false; // nothing cached yet — nothing to invalidate, go straight to a fresh subscribe
     try{
       const countSnap = await getCountFromServer(collection(db, 'reports'));
       if(countSnap.data().count !== byId.size){
