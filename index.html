@@ -970,7 +970,7 @@ function addReportLogRow(filename, msg, isError){
   log.prepend(row);
 }
 
-const REPORTS_CACHE_KEY = 'bfx_reports_cache_v1';
+const REPORTS_CACHE_KEY = 'bfx_reports_cache_v1_' + firebaseConfig.projectId;
 
 function loadCachedReports(){
   try{
@@ -2441,19 +2441,30 @@ function cleanOcrNumber(value){
 }
 
 function factionColor(faction){
-  return /imperial/i.test(faction) ? '#4169E1' :
-         /rebel/i.test(faction) ? '#D93311' : '#FFFFFF';
+  return /imperial|blue/i.test(faction) ? '#4169E1' :
+         /rebel|red/i.test(faction) ? '#D93311' : '#FFFFFF';
 }
 
-function buildStandardBattleReportHtml(players, title='BATTLEFIELD OVER'){
+// extraColumnLabels carries through any columns the source screenshot had
+// that aren't part of the 12 standard fields (e.g. "Medic Revives Performed"
+// on medic-focused rounds instead of "Captures"). Kills/assists/deaths/
+// damage/healing always come from the 12 standard fields below regardless
+// of which extra columns a given report does or doesn't have — those are
+// the stats every report type carries, so they're never the ones affected
+// by a report lacking a "Captures" column.
+function buildStandardBattleReportHtml(players, title='BATTLEFIELD OVER', extraColumnLabels=[]){
   const headers = [
     'Name','Profession','Faction','Kills','Assists','Deaths','Damage',
-    'Largest Performed Hit','Damage Taken','Healing','Largest Heal','Captures'
+    'Largest Performed Hit','Damage Taken','Healing','Largest Heal','Captures',
+    ...extraColumnLabels
   ];
 
   const rows = players.map((p, index) => {
     const bg = index % 2 === 0 ? '#FFFFFF' : '#CCCCCC';
     const fc = factionColor(p.faction);
+    const extraCells = extraColumnLabels
+      .map(label => `<td bgcolor="${bg}">${cleanOcrNumber((p.extra || {})[label])}</td>`)
+      .join('\n');
     return `<tr>
 <td bgcolor="${bg}"><font color="${fc}">${htmlEscape(p.name)}</font></td>
 <td bgcolor="${bg}">${htmlEscape(p.profession)}</td>
@@ -2467,6 +2478,7 @@ function buildStandardBattleReportHtml(players, title='BATTLEFIELD OVER'){
 <td bgcolor="${bg}">${cleanOcrNumber(p.healing)}</td>
 <td bgcolor="${bg}">${cleanOcrNumber(p.largestHeal)}</td>
 <td bgcolor="${bg}">${cleanOcrNumber(p.captures)}</td>
+${extraCells}
 </tr>`;
   }).join('\n');
 
@@ -2478,7 +2490,7 @@ function buildStandardBattleReportHtml(players, title='BATTLEFIELD OVER'){
 <body><center>
 <table border="1">
 <tr>
-${headers.map(h => `<th>${h}</th>`).join('\n')}
+${headers.map(h => `<th>${htmlEscape(h)}</th>`).join('\n')}
 </tr>
 ${rows}
 </table>
@@ -2486,156 +2498,272 @@ ${rows}
 </html>`;
 }
 
+
 /*
- * Tesseract TSV gives each recognized word its bounding box.
- * We locate the header row, use its X positions as the table's column
- * anchors, then group subsequent OCR words by their Y/line position.
+ * GRID-BASED OCR PIPELINE
+ * -----------------------
+ * The previous approach OCR'd the whole image at once, found the header
+ * words, and used their X positions as column "anchors" — then bucketed
+ * every other word by nearest anchor. That's fragile in a way that can't
+ * really be patched: if Tesseract silently fails to read even one header
+ * word (which it does, unpredictably, depending on font/color/scaling),
+ * the anchor for that column is missing, gets interpolated from its
+ * neighbors, lands in the wrong place, and quietly corrupts every row
+ * underneath it — with no error, just wrong numbers.
+ *
+ * This version never infers column boundaries from OCR text at all.
+ * A bordered HTML table renders actual grid lines: a column of pixels
+ * that is a dark, roughly-neutral gray for almost its full height is a
+ * vertical border, and likewise for horizontal borders, regardless of
+ * what's OCR'd on either side of it. We detect that grid directly from
+ * pixel structure, then crop out each CELL individually and OCR it on
+ * its own. There is no other column's text in a cell crop, so there is
+ * nothing for it to bleed into, and no header word that can silently
+ * vanish and corrupt a downstream column.
  */
-function parseBattleReportFromTsv(data){
-  const words = (data.words || [])
-    .filter(w => (w.text || '').trim() && (w.conf == null || w.conf >= 20))
-    .map(w => ({
-      text: w.text.trim(),
-      x: w.bbox.x0,
-      x2: w.bbox.x1,
-      y: w.bbox.y0,
-      y2: w.bbox.y1,
-      line: `${w.block_num}:${w.par_num}:${w.line_num}`
-    }));
 
-  if(!words.length) throw new Error('OCR did not find any readable text.');
+const OCR_NUMERIC_WHITELIST = '0123456789';
+const OCR_TEXT_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'- ";
 
-  const required = [
-    'name','profession','faction','kills','assists','deaths','damage',
-    'largest','performed','hit','damage','taken','healing','largest','heal','captures'
-  ];
+// Battle reports differ by battleground type — some track a "Captures"
+// column, others (medic-focused rounds) track "Medic Revives Performed" /
+// "Medic Cleanses" instead. Headers are read from the image itself and
+// matched against this table rather than assumed to always be the same
+// fixed 12 columns in the same order.
+const HEADER_FIELD_MAP = {
+  'name': 'name',
+  'profession': 'profession',
+  'faction': 'faction',
+  'kills': 'kills',
+  'assists': 'assists',
+  'deaths': 'deaths',
+  'damage': 'damage',
+  'largestperformedhit': 'largestHit',
+  'damagetaken': 'damageTaken',
+  'healing': 'healing',
+  'largestheal': 'largestHeal',
+  'captures': 'captures',
+  'medicrevivesperformed': 'medicRevives',
+  'mediccleanses': 'medicCleanses'
+};
+const TEXT_FIELDS = new Set(['name','profession','faction']);
 
-  // Find the line containing the most known header words.
-  const lineGroups = new Map();
-  for(const w of words){
-    if(!lineGroups.has(w.line)) lineGroups.set(w.line, []);
-    lineGroups.get(w.line).push(w);
-  }
+function normalizeHeaderLabel(text){
+  return String(text||'').toLowerCase().replace(/[^a-z]/g,'');
+}
 
-  let header = null;
-  let bestScore = 0;
-  for(const lineWords of lineGroups.values()){
-    const normalized = lineWords.map(w => w.text.toLowerCase().replace(/[^a-z]/g,''));
-    const score = normalized.filter(v =>
-      ['name','profession','faction','kills','assists','deaths','damage','largest','performed','hit','taken','healing','heal','captures'].includes(v)
-    ).length;
-    if(score > bestScore){
-      bestScore = score;
-      header = lineWords.sort((a,b)=>a.x-b.x);
+function loadImageToCanvas(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      URL.revokeObjectURL(img.src);
+      resolve(canvas);
+    };
+    img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error('Could not load the image file.')); };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// Groups nearby pixel indices (e.g. 223, 224, 226) into a single boundary
+// position, since anti-aliasing/table double-borders often show a grid
+// line as 2-3 adjacent columns rather than exactly one.
+function groupIndices(indices, gap){
+  const groups = [];
+  let cur = [indices[0]];
+  for(let i=1;i<indices.length;i++){
+    if(indices[i] - cur[cur.length-1] <= gap){
+      cur.push(indices[i]);
+    } else {
+      groups.push(cur);
+      cur = [indices[i]];
     }
   }
+  groups.push(cur);
+  return groups.map(g => g.reduce((a,b)=>a+b, 0) / g.length);
+}
 
-  if(!header || bestScore < 7){
-    throw new Error('Could not locate the battle-report table headers. Use a clear screenshot containing the full table.');
-  }
+function detectTableGrid(canvas){
+  const w = canvas.width, h = canvas.height;
+  const { data } = canvas.getContext('2d').getImageData(0, 0, w, h);
 
-  // Known header sequence; locate the first word of each column.
-  const headerNames = [
-    'name','profession','faction','kills','assists','deaths','damage',
-    'largest','damage','healing','largest','captures'
-  ];
-  const anchors = [];
-  let searchFrom = 0;
+  const colGrayCount = new Float64Array(w);
+  const rowGrayCount = new Float64Array(h);
 
-  for(const target of headerNames){
-    let found = -1;
-    for(let i=searchFrom;i<header.length;i++){
-      const n = header[i].text.toLowerCase().replace(/[^a-z]/g,'');
-      if(n === target || (target === 'largest' && n.startsWith('largest'))){
-        found = i;
-        break;
+  for(let y=0; y<h; y++){
+    const rowBase = y * w * 4;
+    for(let x=0; x<w; x++){
+      const i = rowBase + x*4;
+      const r = data[i], g = data[i+1], b = data[i+2];
+      if(Math.abs(r-g) < 10 && Math.abs(g-b) < 10 && r < 200){
+        colGrayCount[x]++;
+        rowGrayCount[y]++;
       }
     }
-    if(found >= 0){
-      anchors.push(header[found].x);
-      searchFrom = found + 1;
-    } else {
-      anchors.push(null);
-    }
   }
 
-  // The two "largest" columns and the second "damage" can be disambiguated
-  // by their position. Fill missing anchors from evenly spaced header centers.
-  const validAnchors = anchors.filter(x => x != null);
-  if(validAnchors.length < 7) throw new Error('Could not determine the report columns.');
+  const colIdx = [];
+  for(let x=0;x<w;x++) if(colGrayCount[x]/h > 0.8) colIdx.push(x);
+  const rowIdx = [];
+  for(let y=0;y<h;y++) if(rowGrayCount[y]/w > 0.5) rowIdx.push(y);
 
-  // Build column boundaries from header anchor positions. Missing anchors
-  // are interpolated between neighboring known anchors.
-  for(let i=0;i<anchors.length;i++){
-    if(anchors[i] != null) continue;
-    let left = i-1;
-    while(left >= 0 && anchors[left] == null) left--;
-    let right = i+1;
-    while(right < anchors.length && anchors[right] == null) right++;
-    if(left >= 0 && right < anchors.length){
-      anchors[i] = anchors[left] + (anchors[right]-anchors[left]) * ((i-left)/(right-left));
-    }
+  if(!colIdx.length || !rowIdx.length){
+    throw new Error('Could not detect a gridded table in this image. Use a screenshot of the full bordered battle-report table.');
   }
 
-  // For the two ambiguous "damage" header positions, the sequential search
-  // above normally resolves them correctly. Ensure monotonicity.
-  for(let i=1;i<anchors.length;i++){
-    if(anchors[i] == null) anchors[i] = anchors[i-1] + 1;
+  const cols = groupIndices(colIdx, 4);
+  const rows = groupIndices(rowIdx, 4);
+
+  // A table's outer-right/bottom edge sometimes isn't drawn with a visible
+  // border even though every internal grid line is — fall back to the
+  // image edge for whichever boundary wasn't found.
+  if(cols[0] > 10) cols.unshift(0);
+  if(cols[cols.length-1] < w-10) cols.push(w-1);
+  if(rows[0] > 10) rows.unshift(0);
+  if(rows[rows.length-1] < h-10) rows.push(h-1);
+
+  return { cols, rows };
+}
+
+function cropCellCanvas(sourceCanvas, x0, x1, y0, y1, inset=3, scale=4){
+  const sx = Math.round(x0) + inset;
+  const sy = Math.round(y0) + inset;
+  const sw = Math.round(x1) - Math.round(x0) - inset*2;
+  const sh = Math.round(y1) - Math.round(y0) - inset*2;
+  if(sw <= 0 || sh <= 0) return null;
+  const out = document.createElement('canvas');
+  out.width = sw * scale;
+  out.height = sh * scale;
+  const ctx = out.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+  return out;
+}
+
+// Digits only, PSM 6 first. Isolated single-character cells are the one
+// case PSM 6 doesn't already nail, so a couple of alternate page segmentation
+// modes are kept as a fallback rather than voted across (voting across PSMs
+// on every cell is what caused the "correct answer outvoted" bug last time).
+async function ocrNumericCell(worker, cellCanvas){
+  if(!cellCanvas) return '0';
+  for(const psm of ['6','7','8']){
+    await worker.setParameters({ tessedit_pageseg_mode: psm, tessedit_char_whitelist: OCR_NUMERIC_WHITELIST });
+    const { data } = await worker.recognize(cellCanvas);
+    const digits = (data.text || '').replace(/[^0-9]/g, '');
+    if(digits !== '') return digits;
+  }
+  return '0'; // a genuinely empty numeric cell in these reports means 0
+}
+
+async function ocrTextCell(worker, cellCanvas){
+  if(!cellCanvas) return '';
+  for(const psm of ['6','7']){
+    await worker.setParameters({ tessedit_pageseg_mode: psm, tessedit_char_whitelist: OCR_TEXT_WHITELIST });
+    const { data } = await worker.recognize(cellCanvas);
+    const txt = (data.text || '').replace(/\s+/g, ' ').trim();
+    if(txt !== '') return txt;
+  }
+  return '';
+}
+
+async function parseBattleReportFromGrid(canvas, workerPool, onProgress){
+  const { cols, rows } = detectTableGrid(canvas);
+  const nCols = cols.length - 1;
+  const nRows = rows.length - 1;
+  if(nCols < 4 || nRows < 2){
+    throw new Error('Could not detect a gridded table with enough columns and rows in this image.');
   }
 
-  const rows = [];
-  const sortedLines = [...lineGroups.values()]
-    .map(ws => ws.sort((a,b)=>a.x-b.x))
-    .filter(ws => ws[0].y > Math.max(...header.map(w=>w.y2)) - 5)
-    .sort((a,b)=>a[0].y-b[0].y);
-
-  // Ignore the header line and collect lines beneath it. A player row is
-  // usually one OCR line; wrapped names are merged when their Y is close.
-  const headerBottom = Math.max(...header.map(w=>w.y2));
-  const dataLines = sortedLines.filter(ws => ws[0].y > headerBottom - 3);
-
-  function columnForX(x){
-    let best = 0;
-    let bestDist = Infinity;
-    for(let i=0;i<anchors.length;i++){
-      const d = Math.abs(x - anchors[i]);
-      if(d < bestDist){ bestDist = d; best = i; }
-    }
-    return best;
+  // Header row: OCR each header cell on its own to learn which stat lives
+  // in which column, rather than assuming a fixed column order.
+  const fieldForColumn = new Array(nCols).fill(null);
+  const rawHeaderForColumn = new Array(nCols).fill('');
+  for(let c=0; c<nCols; c++){
+    const cell = cropCellCanvas(canvas, cols[c], cols[c+1], rows[0], rows[1]);
+    const label = await ocrTextCell(workerPool[0], cell);
+    rawHeaderForColumn[c] = label;
+    fieldForColumn[c] = HEADER_FIELD_MAP[normalizeHeaderLabel(label)] || null;
   }
 
-  for(const ws of dataLines){
-    const cells = Array.from({length:12},()=>[]);
-    for(const w of ws){
-      const ci = columnForX(w.x);
-      cells[ci].push(w.text);
+  const foundFields = new Set(fieldForColumn.filter(Boolean));
+  if(!foundFields.has('name') || foundFields.size < 6){
+    throw new Error('Could not recognize the battle-report column headers in this image. Use a clear screenshot containing the full table.');
+  }
+
+  // Columns that don't match a known standard field are still carried
+  // through into the output (as extra columns) instead of being silently
+  // dropped, so a medic-focused round doesn't lose its medic stats.
+  const extraColumnLabels = [];
+  fieldForColumn.forEach((f, c) => {
+    if(!f) extraColumnLabels.push(rawHeaderForColumn[c] || `Column ${c+1}`);
+  });
+
+  // Data cells: crop + OCR every cell independently, spread across a small
+  // pool of workers so cells are processed several at a time.
+  const tasks = [];
+  for(let r=1; r<nRows; r++){
+    for(let c=0; c<nCols; c++) tasks.push({ r, c });
+  }
+  const results = new Array(tasks.length);
+  const totalCells = tasks.length;
+  let done = 0;
+  let nextTask = 0;
+
+  async function runWorker(worker){
+    while(true){
+      const taskIdx = nextTask++;
+      if(taskIdx >= tasks.length) return;
+      const { r, c } = tasks[taskIdx];
+      const cell = cropCellCanvas(canvas, cols[c], cols[c+1], rows[r], rows[r+1]);
+      const field = fieldForColumn[c];
+      const isText = field ? TEXT_FIELDS.has(field) : false;
+      results[taskIdx] = isText ? await ocrTextCell(worker, cell) : await ocrNumericCell(worker, cell);
+      done++;
+      if(onProgress) onProgress(done, totalCells);
     }
-    const values = cells.map(c=>c.join(' ').trim());
+  }
+  await Promise.all(workerPool.map(w => runWorker(w)));
 
-    // A valid player row needs a name and at least several populated cells.
-    if(!values[0] || values.filter(Boolean).length < 5) continue;
+  // Assemble OCR'd cells (flat, row-major) back into player rows.
+  const players = [];
+  for(let r=1; r<nRows; r++){
+    const rowVals = {};
+    const extra = {};
+    for(let c=0; c<nCols; c++){
+      const value = results[(r-1)*nCols + c];
+      const field = fieldForColumn[c];
+      if(field) rowVals[field] = value;
+      else extra[rawHeaderForColumn[c] || `Column ${c+1}`] = value;
+    }
 
-    // Header fragments occasionally appear as another line; skip them.
-    if(/^name$/i.test(values[0]) || /^profession$/i.test(values[0])) continue;
+    if(!rowVals.name) continue;
+    if(/^name$/i.test(rowVals.name) || /^profession$/i.test(rowVals.name)) continue; // stray header row
 
-    rows.push({
-      name: values[0],
-      profession: values[1] || 'Unknown',
-      faction: values[2] || 'Unknown',
-      kills: cleanOcrNumber(values[3]),
-      assists: cleanOcrNumber(values[4]),
-      deaths: cleanOcrNumber(values[5]),
-      damage: cleanOcrNumber(values[6]),
-      largestHit: cleanOcrNumber(values[7]),
-      damageTaken: cleanOcrNumber(values[8]),
-      healing: cleanOcrNumber(values[9]),
-      largestHeal: cleanOcrNumber(values[10]),
-      captures: cleanOcrNumber(values[11])
+    players.push({
+      name: rowVals.name,
+      profession: rowVals.profession || 'Unknown',
+      faction: rowVals.faction || 'Unknown',
+      kills: cleanOcrNumber(rowVals.kills),
+      assists: cleanOcrNumber(rowVals.assists),
+      deaths: cleanOcrNumber(rowVals.deaths),
+      damage: cleanOcrNumber(rowVals.damage),
+      largestHit: cleanOcrNumber(rowVals.largestHit),
+      damageTaken: cleanOcrNumber(rowVals.damageTaken),
+      healing: cleanOcrNumber(rowVals.healing),
+      largestHeal: cleanOcrNumber(rowVals.largestHeal),
+      captures: cleanOcrNumber(rowVals.captures), // 0 for report types with no captures column
+      extra
     });
   }
 
-  if(!rows.length) throw new Error('OCR found the table headers but could not extract any player rows.');
-  return rows;
+  if(!players.length) throw new Error('Detected the table grid but could not extract any player rows.');
+  return { players, extraColumnLabels: [...new Set(extraColumnLabels)] };
 }
 
 async function convertImageToBattleHtml(file){
@@ -2645,21 +2773,22 @@ async function convertImageToBattleHtml(file){
   ocrProgressBar.style.width = '0%';
   setOcrStatus('Loading OCR engine…');
 
-  const worker = await Tesseract.createWorker('eng', 1, {
-    logger: m => {
-      if(typeof m.progress === 'number'){
-        ocrProgressBar.style.width = Math.round(m.progress * 100) + '%';
-      }
-      if(m.status) setOcrStatus('OCR: ' + m.status + (m.progress ? ` ${Math.round(m.progress*100)}%` : ''));
-    }
-  });
-
+  const POOL_SIZE = 4;
+  const workerPool = [];
   try{
-    const { data } = await worker.recognize(file);
-    setOcrStatus('Reading battle-report table…');
+    for(let i=0; i<POOL_SIZE; i++){
+      workerPool.push(await Tesseract.createWorker('eng', 1));
+    }
 
-    const players = parseBattleReportFromTsv(data);
-    convertedReportHtml = buildStandardBattleReportHtml(players, 'BATTLEFIELD OVER');
+    setOcrStatus('Detecting table structure…');
+    const canvas = await loadImageToCanvas(file);
+
+    const { players, extraColumnLabels } = await parseBattleReportFromGrid(canvas, workerPool, (done, total) => {
+      ocrProgressBar.style.width = Math.round((done/total) * 100) + '%';
+      setOcrStatus(`Reading battle-report cells… ${done}/${total}`);
+    });
+
+    convertedReportHtml = buildStandardBattleReportHtml(players, 'BATTLEFIELD OVER', extraColumnLabels);
     convertedReportFile = new File(
       [convertedReportHtml],
       (file.name.replace(/\.[^.]+$/,'') || 'BATTLEFIELD_OVER') + '.html',
@@ -2671,7 +2800,7 @@ async function convertImageToBattleHtml(file){
     setOcrStatus(`Converted ${players.length} player${players.length===1?'':'s'} to standard BATTLEFIELD_OVER.html format.`, 'ok');
     return convertedReportFile;
   } finally {
-    await worker.terminate();
+    await Promise.all(workerPool.map(w => w.terminate()));
     ocrProgress.style.display = 'none';
   }
 }
